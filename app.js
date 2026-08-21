@@ -138,11 +138,31 @@ function parsePriceString(str) {
   return parseFloat(cleaned);
 }
 
+// Some receipts print the product name and its price on two separate lines.
+// Detect a line that is JUST a price and glue it onto the previous text-only line.
+const PRICE_ONLY_RE = /^\(?-?\d[\d.,]{0,10}\d{2}\)?\s*(?:kr\.?|dkk)?$/i;
+function mergeMultilineRows(lines) {
+  const merged = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const next = lines[i + 1];
+    const lineHasOwnPrice = /\d[\d.,]{0,10}\d{2}\s*(?:kr\.?|dkk)?\s*$/i.test(line);
+    if (!lineHasOwnPrice && next && PRICE_ONLY_RE.test(next)) {
+      merged.push(`${line} ${next}`);
+      i++;
+    } else {
+      merged.push(line);
+    }
+  }
+  return merged;
+}
+
 function parseReceiptText(raw) {
-  const lines = raw
+  const rawLines = raw
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 1);
+  const lines = mergeMultilineRows(rawLines);
 
   const priceRe = /(\d[\d.,]{0,10}\d{2})\s*(?:kr\.?|dkk)?\s*$/i;
   let items = [];
@@ -210,6 +230,91 @@ function fileToDataUrl(file, maxDim = 1600) {
   });
 }
 
+/* ------------------------------- smart reader (on-device LLM) ------------------------------- */
+// Small (~250M param) instruction model, loaded lazily on first scan and cached by the
+// browser/service worker afterwards. If it fails to load or times out, the app falls
+// back to the rule-based parser above — the LLM only ever refines, never blocks.
+const LLM_MODEL = "Xenova/LaMini-Flan-T5-248M";
+let llmPipelinePromise = null;
+
+function getLLM() {
+  if (!llmPipelinePromise) {
+    llmPipelinePromise = (async () => {
+      const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");
+      env.allowLocalModels = false;
+      return pipeline("text2text-generation", LLM_MODEL, {
+        quantized: true,
+        progress_callback: (p) => {
+          if (p.status === "progress" && typeof p.progress === "number") {
+            showProgress(true, `Downloading smart reader (one-time)… ${Math.round(p.progress)}%`, p.progress / 100);
+          }
+        },
+      });
+    })();
+  }
+  return llmPipelinePromise;
+}
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("smart reader timed out")), ms)),
+  ]);
+}
+
+function buildLLMPrompt(rawText) {
+  const catList = CATEGORIES.map((c) => c.name).join(", ");
+  return `Read this messy OCR text from a Danish or English shop receipt. Product names and their prices are sometimes on separate lines — pair them up. Output ONLY strict JSON, no explanation, in exactly this shape:
+{"store":"string","date":"YYYY-MM-DD or empty","currency":"kr. or empty","items":[{"product":"string","price":number,"category":"one of: ${catList}"}],"total":number}
+Prices must be plain numbers with a dot for decimals.
+
+OCR text:
+"""
+${rawText.slice(0, 1800)}
+"""
+
+JSON:`;
+}
+
+async function llmExtract(rawText) {
+  const generator = await withTimeout(getLLM(), 45000);
+  showProgress(true, "Reading with smart reader…", 0.9);
+  const out = await withTimeout(
+    generator(buildLLMPrompt(rawText), { max_new_tokens: 700, temperature: 0.01, do_sample: false }),
+    30000
+  );
+  const text = Array.isArray(out) ? out[0].generated_text : out.generated_text;
+  const clean = String(text || "").replace(/```json|```/g, "").trim();
+  const start = clean.indexOf("{");
+  const end = clean.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("Smart reader returned no JSON");
+  const parsed = JSON.parse(clean.slice(start, end + 1));
+  if (!Array.isArray(parsed.items) || parsed.items.length === 0) throw new Error("Smart reader found no items");
+  return parsed;
+}
+
+async function refineWithLLM(rawText, fallbackParsed) {
+  try {
+    const llm = await llmExtract(rawText);
+    return {
+      store: llm.store || fallbackParsed.store,
+      location: fallbackParsed.location,
+      date: llm.date || fallbackParsed.date,
+      currency: llm.currency || fallbackParsed.currency,
+      items: llm.items.map((it) => ({
+        id: uid(),
+        product: (it.product || "Item").toString().slice(0, 80),
+        price: Number(it.price) || 0,
+        category: CATEGORIES.some((c) => c.name === it.category) ? it.category : "Other",
+      })),
+      total: Number(llm.total) || llm.items.reduce((s, i) => s + (Number(i.price) || 0), 0),
+    };
+  } catch (e) {
+    console.warn("Smart reader unavailable, using standard parsing:", e.message);
+    return fallbackParsed;
+  }
+}
+
 async function handleFile(file) {
   if (!file) return;
   showError(null);
@@ -220,13 +325,14 @@ async function handleFile(file) {
       logger: (m) => {
         if (m.status && typeof m.progress === "number") {
           const label = m.status === "recognizing text" ? "Reading text…" : m.status;
-          showProgress(true, label.charAt(0).toUpperCase() + label.slice(1), m.progress);
+          showProgress(true, label.charAt(0).toUpperCase() + label.slice(1), m.progress * 0.7);
         }
       },
     });
     const text = result?.data?.text || "";
     if (!text.trim()) throw new Error("No text found");
-    const parsed = parseReceiptText(text);
+    const ruleParsed = parseReceiptText(text);
+    const parsed = await refineWithLLM(text, ruleParsed);
     const receipt = {
       id: uid(),
       store: parsed.store,
