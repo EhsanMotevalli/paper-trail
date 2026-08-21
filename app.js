@@ -108,15 +108,35 @@ function parseDate(text) {
   return null;
 }
 
+const DEFAULT_CURRENCY = "kr.";
+
 function detectCurrency(text) {
+  if (/\bDKK\b/i.test(text) || /\bkr\.?\b/i.test(text)) return "kr.";
   if (/\$/.test(text)) return "$";
   if (/€/.test(text)) return "€";
   if (/£/.test(text)) return "£";
-  const m = text.match(/\b(DKK|USD|EUR|GBP|SEK|NOK|kr\.?)\b/i);
-  return m ? m[1].toUpperCase() : "";
+  const m = text.match(/\b(USD|EUR|GBP|SEK|NOK)\b/i);
+  if (m) return m[1].toUpperCase();
+  return DEFAULT_CURRENCY;
 }
 
-const SKIP_WORDS = /\b(subtotal|sub total|total|tax|vat|change|cash|card|balance|amount due|tender|visa|mastercard|payment|thank you|receipt|approved)\b/i;
+const SKIP_WORDS = /\b(subtotal|sub\s*total|delsum|total|i\s*alt|ialt|tax|vat|moms|afgift|change|byttepenge|cash|kontant|card|kort|dankort|balance|saldo|amount due|beløb|tender|visa|mastercard|payment|betaling|thank you|tak|receipt|kvittering|bon|approved|godkendt|rabat|discount)\b/i;
+
+// Parses a trailing number that may be Danish-style "1.234,56" (period thousands,
+// comma decimal) or standard "1,234.56" (comma thousands, period decimal).
+function parsePriceString(str) {
+  str = str.trim();
+  const lastComma = str.lastIndexOf(",");
+  const lastDot = str.lastIndexOf(".");
+  let decimalSep = null;
+  if (lastComma > -1 && lastDot > -1) decimalSep = lastComma > lastDot ? "," : ".";
+  else if (lastComma > -1) decimalSep = ",";
+  else if (lastDot > -1) decimalSep = ".";
+  if (!decimalSep) return parseFloat(str);
+  const thousandSep = decimalSep === "," ? "." : ",";
+  const cleaned = str.split(thousandSep).join("").replace(decimalSep, ".");
+  return parseFloat(cleaned);
+}
 
 function parseReceiptText(raw) {
   const lines = raw
@@ -124,17 +144,19 @@ function parseReceiptText(raw) {
     .map((l) => l.trim())
     .filter((l) => l.length > 1);
 
-  const priceRe = /(\d{1,4}[.,]\d{2})\s*$/;
+  const priceRe = /(\d[\d.,]{0,10}\d{2})\s*(?:kr\.?|dkk)?\s*$/i;
   let items = [];
   let totalCandidates = [];
 
   for (const line of lines) {
     const m = line.match(priceRe);
     if (!m) continue;
-    const price = parseFloat(m[1].replace(",", "."));
+    const price = parsePriceString(m[1]);
     if (Number.isNaN(price) || price <= 0) continue;
     const label = line.slice(0, m.index).replace(/[.\-·_\s]+$/, "").trim();
-    if (/\btotal\b/i.test(line) && !/subtotal|sub total/i.test(line)) {
+    const isTotalLine = /\b(total|i\s*alt|ialt)\b/i.test(line);
+    const isSubLine = /\b(subtotal|sub\s*total|delsum)\b/i.test(line);
+    if (isTotalLine && !isSubLine) {
       totalCandidates.push(price);
       continue;
     }
@@ -147,7 +169,7 @@ function parseReceiptText(raw) {
     ? Math.max(...totalCandidates)
     : items.reduce((s, i) => s + i.price, 0);
 
-  const storeLine = lines.find((l) => !/^\d+$/.test(l) && l.replace(/[^a-zA-Z]/g, "").length >= 3) || lines[0] || "Unknown store";
+  const storeLine = lines.find((l) => !/^\d+$/.test(l) && l.replace(/[^a-zA-ZæøåÆØÅ]/g, "").length >= 3) || lines[0] || "Unknown store";
 
   const date = parseDate(raw) || todayISO();
   const currency = detectCurrency(raw);
@@ -194,7 +216,7 @@ async function handleFile(file) {
   showProgress(true, "Loading recognizer…", 0);
   try {
     const dataUrl = await fileToDataUrl(file);
-    const result = await Tesseract.recognize(dataUrl, "eng", {
+    const result = await Tesseract.recognize(dataUrl, "dan+eng", {
       logger: (m) => {
         if (m.status && typeof m.progress === "number") {
           const label = m.status === "recognizing text" ? "Reading text…" : m.status;
@@ -232,7 +254,7 @@ function addManual() {
     store: "New receipt",
     location: "",
     date: todayISO(),
-    currency: "",
+    currency: DEFAULT_CURRENCY,
     items: [{ id: uid(), product: "Item", price: 0, category: "Other" }],
     total: 0,
   };
@@ -327,7 +349,7 @@ function renderStats() {
   document.getElementById("stats").innerHTML = ["Today", "This week", "This month"]
     .map((label, i) => {
       const val = [day, week, month][i];
-      return `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value">${val.toFixed(2)}</div></div>`;
+      return `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value">${val.toFixed(2)} <span style="font-size:11px;color:var(--ink-light);font-weight:500;">kr.</span></div></div>`;
     })
     .join("");
 }
@@ -348,7 +370,7 @@ function renderChart() {
   const total = data.reduce((s, d) => s + d.value, 0);
   document.getElementById("panel-total-label").textContent =
     `${filterCat === "All" ? "Total" : filterCat} · last ${data.length} ${granularity === "day" ? "days" : granularity === "week" ? "weeks" : "months"}`;
-  document.getElementById("panel-total-value").textContent = total.toFixed(2);
+  document.getElementById("panel-total-value").textContent = `${total.toFixed(2)} kr.`;
 
   document.querySelectorAll("#gtoggle button").forEach((b) => b.classList.toggle("active", b.dataset.g === granularity));
 
