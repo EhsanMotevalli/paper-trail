@@ -120,41 +120,74 @@ function detectCurrency(text) {
   return DEFAULT_CURRENCY;
 }
 
-const SKIP_WORDS = /\b(subtotal|sub\s*total|delsum|total|i\s*alt|ialt|tax|vat|moms|afgift|change|byttepenge|cash|kontant|card|kort|dankort|balance|saldo|amount due|beløb|tender|visa|mastercard|payment|betaling|thank you|tak|receipt|kvittering|bon|approved|godkendt|rabat|discount)\b/i;
+const SKIP_WORDS = /\b(subtotal|sub\s*total|delsum|total|i\s*alt|ialt|tax|vat|moms|udgør|afgift|change|byttepenge|cash|kontant|card|kort|dankort|betalingskort|balance|saldo|amount due|beløb|tender|visa|mastercard|payment|betaling|thank you|tak|receipt|kvittering|bon|approved|godkendt|butik|momsnr|betjent)\b/i;
+const DISCOUNT_RE = /\b(rabat|discount)\b/i;
 
-// Parses a trailing number that may be Danish-style "1.234,56" (period thousands,
-// comma decimal) or standard "1,234.56" (comma thousands, period decimal).
+// Parses a number that may be Danish-style "1.234,56" (period thousands, comma decimal)
+// or standard "1,234.56" (comma thousands, period decimal). A trailing "-" (Danish
+// receipts mark discounts this way) makes it negative.
 function parsePriceString(str) {
   str = str.trim();
+  const negative = /-\s*$/.test(str);
+  str = str.replace(/-\s*$/, "").trim();
   const lastComma = str.lastIndexOf(",");
   const lastDot = str.lastIndexOf(".");
   let decimalSep = null;
   if (lastComma > -1 && lastDot > -1) decimalSep = lastComma > lastDot ? "," : ".";
   else if (lastComma > -1) decimalSep = ",";
   else if (lastDot > -1) decimalSep = ".";
-  if (!decimalSep) return parseFloat(str);
-  const thousandSep = decimalSep === "," ? "." : ",";
-  const cleaned = str.split(thousandSep).join("").replace(decimalSep, ".");
-  return parseFloat(cleaned);
+  let value;
+  if (!decimalSep) value = parseFloat(str);
+  else {
+    const thousandSep = decimalSep === "," ? "." : ",";
+    value = parseFloat(str.split(thousandSep).join("").replace(decimalSep, "."));
+  }
+  return negative ? -value : value;
 }
 
-// Some receipts print the product name and its price on two separate lines.
-// Detect a line that is JUST a price and glue it onto the previous text-only line.
-const PRICE_ONLY_RE = /^\(?-?\d[\d.,]{0,10}\d{2}\)?\s*(?:kr\.?|dkk)?$/i;
+// Matches a number at the end of a line, Danish or standard style, optionally with a
+// trailing "-" (discount) or "kr"/"dkk" suffix.
+const TRAILING_PRICE_RE = /(\d[\d.,]{0,10}\d{2})\s*(-)?\s*(?:kr\.?|dkk)?\s*$/i;
+
+// Receipts often wrap a single item across 2-3 lines: the product name (and sometimes
+// a size/description line) comes first with no price, then a line like "2 x 40,00   80,00"
+// carries the actual line total. This buffers text-only lines and attaches them to the
+// next line that does carry a price, so "MAMONE KAKAO" + "2 x 40,00 80,00" becomes one
+// row instead of a dangling name and an orphaned "2 x 40,00" fragment.
 function mergeMultilineRows(lines) {
   const merged = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const next = lines[i + 1];
-    const lineHasOwnPrice = /\d[\d.,]{0,10}\d{2}\s*(?:kr\.?|dkk)?\s*$/i.test(line);
-    if (!lineHasOwnPrice && next && PRICE_ONLY_RE.test(next)) {
-      merged.push(`${line} ${next}`);
-      i++;
+  let buffer = [];
+  for (const line of lines) {
+    if (TRAILING_PRICE_RE.test(line)) {
+      merged.push(buffer.length ? `${buffer.join(" ")} ${line}` : line);
+      buffer = [];
     } else {
-      merged.push(line);
+      buffer.push(line);
+      if (buffer.length > 2) buffer.shift(); // cap: item names rarely span 3+ lines
     }
   }
   return merged;
+}
+
+/* --------------------------------- category guessing --------------------------------- */
+const GROCERY_STORE_RE = /\b(netto|rema\s?1000|fakta|bilka|f[øo]tex|irma|lidl|aldi|meny|spar|super\s?brugsen|kvickly|coop)\b/i;
+const CATEGORY_KEYWORDS = {
+  Health: ["håndsprit","handsprit","sprit","medicin","vitamin","paracetamol","apotek","libresse","bind","tampon","plaster"],
+  Home: ["pose","rengøring","opvask","toiletpapir","vaskepulver","køkkenrulle","affaldspose","lys ","stearinlys"],
+  Dining: ["kaffe to go","bakery","bageri","café","restaurant","frokost"],
+  Groceries: [
+    "mælk","ost","hytteost","kylling","okse","laks","fisk","banan","æg","æggebægre","gulerødder","agurk","peber",
+    "squash","iceberg","salat","avocado","blomme","blomkål","kakao","rugbrød","levain","solgryn","brød","frugt",
+    "grønt","kød","mel","ris","pasta","yoghurt","smør","chokolade","kaffe","the","kartofl","tomat","løg","citron",
+  ],
+};
+function guessCategory(product, store) {
+  const p = (product || "").toLowerCase();
+  for (const [cat, words] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (words.some((w) => p.includes(w))) return cat;
+  }
+  if (GROCERY_STORE_RE.test(store || "")) return "Groceries";
+  return "Other";
 }
 
 function parseReceiptText(raw) {
@@ -164,45 +197,94 @@ function parseReceiptText(raw) {
     .filter((l) => l.length > 1);
   const lines = mergeMultilineRows(rawLines);
 
-  const priceRe = /(\d[\d.,]{0,10}\d{2})\s*(?:kr\.?|dkk)?\s*$/i;
+  const storeLine = lines.find((l) => !/^\d+$/.test(l) && l.replace(/[^a-zA-ZæøåÆØÅ]/g, "").length >= 3) || lines[0] || "Unknown store";
+
   let items = [];
   let totalCandidates = [];
 
   for (const line of lines) {
-    const m = line.match(priceRe);
+    const m = line.match(TRAILING_PRICE_RE);
     if (!m) continue;
-    const price = parsePriceString(m[1]);
-    if (Number.isNaN(price) || price <= 0) continue;
+    const price = parsePriceString(m[1] + (m[2] || ""));
+    if (Number.isNaN(price) || price === 0) continue;
     const label = line.slice(0, m.index).replace(/[.\-·_\s]+$/, "").trim();
     const isTotalLine = /\b(total|i\s*alt|ialt)\b/i.test(line);
     const isSubLine = /\b(subtotal|sub\s*total|delsum)\b/i.test(line);
+
     if (isTotalLine && !isSubLine) {
-      totalCandidates.push(price);
+      totalCandidates.push(Math.abs(price));
+      continue;
+    }
+    if (DISCOUNT_RE.test(line) && price < 0) {
+      // Net the discount against the item right above it — that's what was actually paid.
+      if (items.length > 0) items[items.length - 1].price = Math.max(0, items[items.length - 1].price + price);
       continue;
     }
     if (SKIP_WORDS.test(line)) continue;
-    if (!label || label.length < 2) continue;
-    items.push({ id: uid(), product: label, price, category: "Other" });
+    if (!label || label.length < 2 || price < 0) continue;
+    items.push({ id: uid(), product: label, price, category: guessCategory(label, storeLine) });
   }
 
   const total = totalCandidates.length
     ? Math.max(...totalCandidates)
-    : items.reduce((s, i) => s + i.price, 0);
-
-  const storeLine = lines.find((l) => !/^\d+$/.test(l) && l.replace(/[^a-zA-ZæøåÆØÅ]/g, "").length >= 3) || lines[0] || "Unknown store";
+    : Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
 
   const date = parseDate(raw) || todayISO();
   const currency = detectCurrency(raw);
 
   if (items.length === 0 && total > 0) {
-    items.push({ id: uid(), product: "Purchase", price: total, category: "Other" });
+    items.push({ id: uid(), product: "Purchase", price: total, category: guessCategory("", storeLine) });
+  } else if (totalCandidates.length) {
+    // A printed total is ground truth. If OCR dropped a line or misread it, the item
+    // list won't add up — reconcile so category totals still match what was paid.
+    const itemsSum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
+    const diff = Math.round((total - itemsSum) * 100) / 100;
+    if (diff >= 0.05) {
+      items.push({ id: uid(), product: "Unmatched line(s)", price: diff, category: "Other" });
+    }
   }
 
   return { store: storeLine.slice(0, 60), location: "", date, currency, items, total };
 }
 
 /* --------------------------------- OCR flow ----------------------------------- */
-function fileToDataUrl(file, maxDim = 1600) {
+// Converts to grayscale and binarizes with Otsu's method — thermal receipt photos
+// (uneven lighting, slight glare, faint print) OCR far more reliably as clean black
+// text on white than as a color/contrast-filtered photo.
+function binarize(canvas) {
+  const ctx = canvas.getContext("2d");
+  const { width: w, height: h } = canvas;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+  const hist = new Array(256).fill(0);
+  for (let i = 0; i < d.length; i += 4) {
+    const gray = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+    d[i] = d[i + 1] = d[i + 2] = gray;
+    hist[gray]++;
+  }
+  const total = w * h;
+  let sum = 0;
+  for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sumB = 0, wB = 0, maxVar = 0, threshold = 140;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const varBetween = wB * wF * (mB - mF) * (mB - mF);
+    if (varBetween > maxVar) { maxVar = varBetween; threshold = t; }
+  }
+  for (let i = 0; i < d.length; i += 4) {
+    const v = d[i] > threshold ? 255 : 0;
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function fileToDataUrl(file, maxDim = 1800) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const reader = new FileReader();
@@ -221,9 +303,9 @@ function fileToDataUrl(file, maxDim = 1600) {
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext("2d");
-      ctx.filter = "contrast(1.15) brightness(1.05)";
       ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL("image/jpeg", 0.85));
+      binarize(canvas);
+      resolve(canvas.toDataURL("image/jpeg", 0.9));
     };
     img.onerror = reject;
     reader.readAsDataURL(file);
@@ -305,7 +387,9 @@ async function refineWithLLM(rawText, fallbackParsed) {
         id: uid(),
         product: (it.product || "Item").toString().slice(0, 80),
         price: Number(it.price) || 0,
-        category: CATEGORIES.some((c) => c.name === it.category) ? it.category : "Other",
+        category: CATEGORIES.some((c) => c.name === it.category) && it.category !== "Other"
+          ? it.category
+          : guessCategory(it.product, llm.store || fallbackParsed.store),
       })),
       total: Number(llm.total) || llm.items.reduce((s, i) => s + (Number(i.price) || 0), 0),
     };
@@ -341,6 +425,7 @@ async function handleFile(file) {
       currency: parsed.currency,
       items: parsed.items,
       total: parsed.total,
+      readMethod: parsed === ruleParsed ? "rules" : "ai",
     };
     persist([receipt, ...receipts]);
     expandedId = receipt.id;
@@ -570,7 +655,10 @@ function renderReceipts() {
               ${storeHtml}
               <div class="r-meta">${metaHtml}</div>
             </div>
-            <div class="r-total">${Number(r.total).toFixed(2)} <span class="r-currency">${esc(r.currency)}</span></div>
+            <div style="text-align:right;">
+              <div class="r-total">${Number(r.total).toFixed(2)} <span class="r-currency">${esc(r.currency)}</span></div>
+              ${r.readMethod === "rules" ? `<div style="font-size:9.5px;color:var(--ink-light);margin-top:2px;">quick read · check items</div>` : ""}
+            </div>
           </div>
           <div class="r-actions">
             <button class="btn-icon" data-act="toggle-open" data-id="${r.id}">${isOpen ? "&#9650;" : "&#9660;"} ${r.items.length} item${r.items.length !== 1 ? "s" : ""}</button>
