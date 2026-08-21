@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>Paper Trail — Receipt Tracker</title>
+<meta name="description" content="Scan receipts, categorize spending, track it daily, weekly, monthly — on your device, offline." />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2B2620" />
+<link rel="icon" href="icons/favicon-64.png" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Paper Trail" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div>
+        <div class="logo">Paper Trail</div>
+        <div class="tagline">every receipt, accounted for</div>
+      </div>
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A8321F" stroke-width="1.6"><path d="M4 3h16v18l-3-2-3 2-3-2-3 2-3-2-1 2z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="dropzone" id="dropzone">
+      <div id="dz-idle">
+        <div class="dz-hint">Drop a receipt image, or —</div>
+        <div class="dz-actions">
+          <button class="btn btn-primary" id="btn-camera">📷 Take photo</button>
+          <button class="btn btn-secondary" id="btn-upload">⬆ Upload</button>
+          <button class="btn btn-ghost" id="btn-manual">+ Add manually</button>
+        </div>
+        <input id="input-camera" type="file" accept="image/*" capture="environment" hidden />
+        <input id="input-upload" type="file" accept="image/*" hidden />
+      </div>
+      <div id="dz-progress" class="progress-wrap" style="display:none;">
+        <div class="spinner"></div>
+        <div id="progress-text" style="font-size:13px;">Reading your receipt…</div>
+        <div class="progress-bar-track"><div class="progress-bar-fill" id="progress-fill"></div></div>
+      </div>
+    </div>
+
+    <div id="error-box" style="display:none;"></div>
+
+    <div class="panel">
+      <div class="chips" id="chips"></div>
+      <div class="panel-row">
+        <div>
+          <div class="panel-total-label" id="panel-total-label">Total</div>
+          <div class="panel-total-value" id="panel-total-value">0.00</div>
+        </div>
+        <div class="gtoggle" id="gtoggle">
+          <button data-g="day" class="active">Day</button>
+          <button data-g="week">Week</button>
+          <button data-g="month">Month</button>
+        </div>
+      </div>
+      <div class="chart" id="chart"></div>
+    </div>
+
+    <div class="section-label" id="count-label">0 receipts</div>
+    <div id="receipts-list" class="receipts"></div>
+  </div>
+
+  <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js').catch(console.error);
+      });
+    }
+  </script>
+</body>
+</html>
