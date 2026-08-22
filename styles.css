@@ -29,6 +29,20 @@ body {
 .logo { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 26px; letter-spacing: -0.01em; }
 .tagline { color: var(--ink-light); font-size: 12px; margin-top: 2px; }
 
+.settings-btn { background: var(--white); border: 1px solid var(--line); border-radius: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.settings-btn:active { transform: scale(0.95); }
+
+.modal-overlay { position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-end; justify-content: center; }
+@media (min-width: 480px) { .modal-overlay { align-items: center; } }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(43,38,32,0.45); }
+.modal-card { position: relative; background: var(--paper); border-radius: 14px 14px 0 0; padding: 22px 20px calc(20px + env(safe-area-inset-bottom)); width: 100%; max-width: 420px; box-shadow: 0 -4px 24px rgba(0,0,0,0.2); }
+@media (min-width: 480px) { .modal-card { border-radius: 14px; } }
+.modal-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 18px; margin-bottom: 14px; }
+.modal-label { display: block; font-size: 11px; color: var(--ink-light); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px; }
+.modal-hint { font-size: 11.5px; color: var(--ink-light); margin-top: 6px; line-height: 1.5; }
+.modal-hint a { color: var(--forest); }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
 .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 18px; }
 .stat-card { background: var(--white); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .stat-label { font-size: 10px; color: var(--ink-light); text-transform: uppercase; letter-spacing: .06em; }
