@@ -145,26 +145,46 @@ function parsePriceString(str) {
   return negative ? -value : value;
 }
 
-// Matches a number at the end of a line, Danish or standard style, optionally with a
-// trailing "-" (discount) or "kr"/"dkk" suffix.
-const TRAILING_PRICE_RE = /(\d[\d.,]{0,10}\d{2})\s*(-)?\s*(?:kr\.?|dkk)?\s*$/i;
+// Matches a proper money amount at the end of a line — requires an actual decimal
+// separator (comma or dot) with 2 trailing digits, so bare digit runs (till numbers,
+// receipt IDs, tax IDs) never get mistaken for a price. Danish-style "1.234,56" and
+// standard "1,234.56" both match; optional trailing "-" marks a discount.
+const TRAILING_PRICE_RE = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*(-)?\s*(?:kr\.?|dkk)?\s*$/i;
+// A line that is NOTHING BUT a price (used to spot a total sitting alone on its own line).
+const PRICE_ONLY_LINE_RE = /^\(?-?\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\)?-?\s*(?:kr\.?|dkk)?$/i;
+// A line that is nothing but "<qty> x <unit price>" — the unit price here is NOT the
+// line's charged total, so it must never be read as the item's price on its own.
+const QTY_ONLY_LINE_RE = /^\d+\s*[x×]\s*\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\s*(?:kr\.?|dkk)?$/i;
 
-// Receipts often wrap a single item across 2-3 lines: the product name (and sometimes
-// a size/description line) comes first with no price, then a line like "2 x 40,00   80,00"
-// carries the actual line total. This buffers text-only lines and attaches them to the
-// next line that does carry a price, so "MAMONE KAKAO" + "2 x 40,00 80,00" becomes one
-// row instead of a dangling name and an orphaned "2 x 40,00" fragment.
+// Receipts wrap a single item across multiple lines in two different ways, and both
+// show up on the same printer depending on column width:
+//  (a) "MAMONE KAKAO" / "2 x 40,00        80,00"      — name, then qty+total together
+//  (b) "MAMONE KAKAO" / "2 x 40,00" / "80,00"          — name, qty-only, total on its own
+// Case (b) is the trap: the qty-only line ends in a number (40,00) that LOOKS like a
+// price but is only the unit price — the real charged amount is the line after it.
 function mergeMultilineRows(lines) {
   const merged = [];
-  let buffer = [];
-  for (const line of lines) {
-    if (TRAILING_PRICE_RE.test(line)) {
-      merged.push(buffer.length ? `${buffer.join(" ")} ${line}` : line);
-      buffer = [];
-    } else {
-      buffer.push(line);
-      if (buffer.length > 2) buffer.shift(); // cap: item names rarely span 3+ lines
+  let nameBuffer = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!TRAILING_PRICE_RE.test(line)) {
+      nameBuffer.push(line);
+      if (nameBuffer.length > 2) nameBuffer.shift(); // wrapped names rarely exceed 2 lines
+      continue;
     }
+    const prefix = nameBuffer.join(" ");
+    if (QTY_ONLY_LINE_RE.test(line)) {
+      const next = lines[i + 1];
+      if (next && PRICE_ONLY_LINE_RE.test(next)) {
+        merged.push(prefix ? `${prefix} ${line} ${next}` : `${line} ${next}`);
+        i++; // the real total line has now been consumed
+        nameBuffer = [];
+        continue;
+      }
+      // No standalone total followed — fall through and use this line's own amount.
+    }
+    merged.push(prefix ? `${prefix} ${line}` : line);
+    nameBuffer = [];
   }
   return merged;
 }
@@ -195,9 +215,21 @@ function parseReceiptText(raw) {
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length > 1);
-  const lines = mergeMultilineRows(rawLines);
 
-  const storeLine = lines.find((l) => !/^\d+$/.test(l) && l.replace(/[^a-zA-ZæøåÆØÅ]/g, "").length >= 3) || lines[0] || "Unknown store";
+  // Store name is the first line. The address (if any) is whatever plain, price-free
+  // lines directly follow it — pulled out BEFORE merging so they can never get glued
+  // onto the first item's label.
+  const storeLine = rawLines[0] || "Unknown store";
+  const addressLines = [];
+  let bodyStart = 1;
+  for (let i = 1; i < rawLines.length && addressLines.length < 2; i++) {
+    if (TRAILING_PRICE_RE.test(rawLines[i])) break;
+    addressLines.push(rawLines[i]);
+    bodyStart = i + 1;
+  }
+  const location = addressLines.join(", ").slice(0, 80);
+
+  const lines = mergeMultilineRows(rawLines.slice(bodyStart));
 
   let items = [];
   let totalCandidates = [];
@@ -244,7 +276,7 @@ function parseReceiptText(raw) {
     }
   }
 
-  return { store: storeLine.slice(0, 60), location: "", date, currency, items, total };
+  return { store: storeLine.slice(0, 60), location, date, currency, items, total };
 }
 
 /* --------------------------------- OCR flow ----------------------------------- */
@@ -312,93 +344,6 @@ function fileToDataUrl(file, maxDim = 1800) {
   });
 }
 
-/* ------------------------------- smart reader (on-device LLM) ------------------------------- */
-// Small (~250M param) instruction model, loaded lazily on first scan and cached by the
-// browser/service worker afterwards. If it fails to load or times out, the app falls
-// back to the rule-based parser above — the LLM only ever refines, never blocks.
-const LLM_MODEL = "Xenova/LaMini-Flan-T5-248M";
-let llmPipelinePromise = null;
-
-function getLLM() {
-  if (!llmPipelinePromise) {
-    llmPipelinePromise = (async () => {
-      const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");
-      env.allowLocalModels = false;
-      return pipeline("text2text-generation", LLM_MODEL, {
-        quantized: true,
-        progress_callback: (p) => {
-          if (p.status === "progress" && typeof p.progress === "number") {
-            showProgress(true, `Downloading smart reader (one-time)… ${Math.round(p.progress)}%`, p.progress / 100);
-          }
-        },
-      });
-    })();
-  }
-  return llmPipelinePromise;
-}
-
-function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("smart reader timed out")), ms)),
-  ]);
-}
-
-function buildLLMPrompt(rawText) {
-  const catList = CATEGORIES.map((c) => c.name).join(", ");
-  return `Read this messy OCR text from a Danish or English shop receipt. Product names and their prices are sometimes on separate lines — pair them up. Output ONLY strict JSON, no explanation, in exactly this shape:
-{"store":"string","date":"YYYY-MM-DD or empty","currency":"kr. or empty","items":[{"product":"string","price":number,"category":"one of: ${catList}"}],"total":number}
-Prices must be plain numbers with a dot for decimals.
-
-OCR text:
-"""
-${rawText.slice(0, 1800)}
-"""
-
-JSON:`;
-}
-
-async function llmExtract(rawText) {
-  const generator = await withTimeout(getLLM(), 45000);
-  showProgress(true, "Reading with smart reader…", 0.9);
-  const out = await withTimeout(
-    generator(buildLLMPrompt(rawText), { max_new_tokens: 700, temperature: 0.01, do_sample: false }),
-    30000
-  );
-  const text = Array.isArray(out) ? out[0].generated_text : out.generated_text;
-  const clean = String(text || "").replace(/```json|```/g, "").trim();
-  const start = clean.indexOf("{");
-  const end = clean.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("Smart reader returned no JSON");
-  const parsed = JSON.parse(clean.slice(start, end + 1));
-  if (!Array.isArray(parsed.items) || parsed.items.length === 0) throw new Error("Smart reader found no items");
-  return parsed;
-}
-
-async function refineWithLLM(rawText, fallbackParsed) {
-  try {
-    const llm = await llmExtract(rawText);
-    return {
-      store: llm.store || fallbackParsed.store,
-      location: fallbackParsed.location,
-      date: llm.date || fallbackParsed.date,
-      currency: llm.currency || fallbackParsed.currency,
-      items: llm.items.map((it) => ({
-        id: uid(),
-        product: (it.product || "Item").toString().slice(0, 80),
-        price: Number(it.price) || 0,
-        category: CATEGORIES.some((c) => c.name === it.category) && it.category !== "Other"
-          ? it.category
-          : guessCategory(it.product, llm.store || fallbackParsed.store),
-      })),
-      total: Number(llm.total) || llm.items.reduce((s, i) => s + (Number(i.price) || 0), 0),
-    };
-  } catch (e) {
-    console.warn("Smart reader unavailable, using standard parsing:", e.message);
-    return fallbackParsed;
-  }
-}
-
 async function handleFile(file) {
   if (!file) return;
   showError(null);
@@ -409,14 +354,13 @@ async function handleFile(file) {
       logger: (m) => {
         if (m.status && typeof m.progress === "number") {
           const label = m.status === "recognizing text" ? "Reading text…" : m.status;
-          showProgress(true, label.charAt(0).toUpperCase() + label.slice(1), m.progress * 0.7);
+          showProgress(true, label.charAt(0).toUpperCase() + label.slice(1), m.progress);
         }
       },
     });
     const text = result?.data?.text || "";
     if (!text.trim()) throw new Error("No text found");
-    const ruleParsed = parseReceiptText(text);
-    const parsed = await refineWithLLM(text, ruleParsed);
+    const parsed = parseReceiptText(text);
     const receipt = {
       id: uid(),
       store: parsed.store,
@@ -425,7 +369,6 @@ async function handleFile(file) {
       currency: parsed.currency,
       items: parsed.items,
       total: parsed.total,
-      readMethod: parsed === ruleParsed ? "rules" : "ai",
     };
     persist([receipt, ...receipts]);
     expandedId = receipt.id;
