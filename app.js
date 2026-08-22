@@ -161,6 +161,29 @@ Return ONLY strict JSON, no markdown fences, no commentary, in exactly this shap
 
 async function callClaudeVision(base64) {
   const apiKey = getApiKey();
+  const model = getModel();
+  // Structured extraction doesn't benefit from deliberation, and on Sonnet 5, adaptive
+  // thinking is ON by default and shares the SAME token budget as the actual JSON
+  // answer — with a modest max_tokens that reliably starved the answer and truncated
+  // the JSON mid-way. Disabling thinking (Sonnet-5-only field) fixes that and is
+  // faster/cheaper too. Also give plenty of headroom for long, many-item receipts.
+  const body = {
+    model,
+    max_tokens: 4096,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+          { type: "text", text: buildExtractionPrompt() },
+        ],
+      },
+    ],
+  };
+  if (model === "claude-sonnet-5") {
+    body.thinking = { type: "disabled" };
+  }
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -169,19 +192,7 @@ async function callClaudeVision(base64) {
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     },
-    body: JSON.stringify({
-      model: getModel(),
-      max_tokens: 1500,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-            { type: "text", text: buildExtractionPrompt() },
-          ],
-        },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -196,6 +207,9 @@ async function callClaudeVision(base64) {
   }
 
   const data = await response.json();
+  if (data.stop_reason === "max_tokens") {
+    throw new Error("The receipt was too long for the reply to finish — try again (this should be fixed now, but a very long receipt can still hit the limit).");
+  }
   const text = (data.content || []).map((b) => b.text || "").join("").trim();
   const clean = text.replace(/```json|```/g, "").trim();
   const start = clean.indexOf("{");
