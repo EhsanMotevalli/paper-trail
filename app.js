@@ -92,104 +92,33 @@ function shiftPeriod(key, g, delta) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 
-/* ------------------------------ receipt parsing ------------------------------ */
-function parseDate(text) {
-  let m = text.match(/(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
-  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
-  m = text.match(/(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/);
-  if (m) {
-    let [, a, b, y] = m;
-    if (y.length === 2) y = "20" + y;
-    let day = a, month = b;
-    if (Number(a) > 12) { day = a; month = b; } else if (Number(b) > 12) { day = b; month = a; }
-    if (Number(month) > 12) return null;
-    return `${y}-${pad(month)}-${pad(day)}`;
+/* --------------------------------- settings (API key) --------------------------------- */
+const SETTINGS_KEY = "paperTrailSettings";
+const DEFAULT_MODEL = "claude-sonnet-5";
+function loadSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+  } catch {
+    return {};
   }
-  return null;
 }
-
-const DEFAULT_CURRENCY = "kr.";
-
-function detectCurrency(text) {
-  if (/\bDKK\b/i.test(text) || /\bkr\.?\b/i.test(text)) return "kr.";
-  if (/\$/.test(text)) return "$";
-  if (/€/.test(text)) return "€";
-  if (/£/.test(text)) return "£";
-  const m = text.match(/\b(USD|EUR|GBP|SEK|NOK)\b/i);
-  if (m) return m[1].toUpperCase();
-  return DEFAULT_CURRENCY;
-}
-
-const SKIP_WORDS = /\b(subtotal|sub\s*total|delsum|total|i\s*alt|ialt|tax|vat|moms|udgør|afgift|change|byttepenge|cash|kontant|card|kort|dankort|betalingskort|balance|saldo|amount due|beløb|tender|visa|mastercard|payment|betaling|thank you|tak|receipt|kvittering|bon|approved|godkendt|butik|momsnr|betjent)\b/i;
-const DISCOUNT_RE = /\b(rabat|discount)\b/i;
-
-// Parses a number that may be Danish-style "1.234,56" (period thousands, comma decimal)
-// or standard "1,234.56" (comma thousands, period decimal). A trailing "-" (Danish
-// receipts mark discounts this way) makes it negative.
-function parsePriceString(str) {
-  str = str.trim();
-  const negative = /-\s*$/.test(str);
-  str = str.replace(/-\s*$/, "").trim();
-  const lastComma = str.lastIndexOf(",");
-  const lastDot = str.lastIndexOf(".");
-  let decimalSep = null;
-  if (lastComma > -1 && lastDot > -1) decimalSep = lastComma > lastDot ? "," : ".";
-  else if (lastComma > -1) decimalSep = ",";
-  else if (lastDot > -1) decimalSep = ".";
-  let value;
-  if (!decimalSep) value = parseFloat(str);
-  else {
-    const thousandSep = decimalSep === "," ? "." : ",";
-    value = parseFloat(str.split(thousandSep).join("").replace(decimalSep, "."));
+function saveSettings(s) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  } catch (e) {
+    console.error("save settings failed", e);
   }
-  return negative ? -value : value;
+}
+function getApiKey() {
+  return (loadSettings().apiKey || "").trim();
+}
+function getModel() {
+  return loadSettings().model || DEFAULT_MODEL;
 }
 
-// Matches a proper money amount at the end of a line — requires an actual decimal
-// separator (comma or dot) with 2 trailing digits, so bare digit runs (till numbers,
-// receipt IDs, tax IDs) never get mistaken for a price. Danish-style "1.234,56" and
-// standard "1,234.56" both match; optional trailing "-" marks a discount.
-const TRAILING_PRICE_RE = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*(-)?\s*(?:kr\.?|dkk)?\s*$/i;
-// A line that is NOTHING BUT a price (used to spot a total sitting alone on its own line).
-const PRICE_ONLY_LINE_RE = /^\(?-?\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\)?-?\s*(?:kr\.?|dkk)?$/i;
-// A line that is nothing but "<qty> x <unit price>" — the unit price here is NOT the
-// line's charged total, so it must never be read as the item's price on its own.
-const QTY_ONLY_LINE_RE = /^\d+\s*[x×]\s*\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\s*(?:kr\.?|dkk)?$/i;
-
-// Receipts wrap a single item across multiple lines in two different ways, and both
-// show up on the same printer depending on column width:
-//  (a) "MAMONE KAKAO" / "2 x 40,00        80,00"      — name, then qty+total together
-//  (b) "MAMONE KAKAO" / "2 x 40,00" / "80,00"          — name, qty-only, total on its own
-// Case (b) is the trap: the qty-only line ends in a number (40,00) that LOOKS like a
-// price but is only the unit price — the real charged amount is the line after it.
-function mergeMultilineRows(lines) {
-  const merged = [];
-  let nameBuffer = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!TRAILING_PRICE_RE.test(line)) {
-      nameBuffer.push(line);
-      if (nameBuffer.length > 2) nameBuffer.shift(); // wrapped names rarely exceed 2 lines
-      continue;
-    }
-    const prefix = nameBuffer.join(" ");
-    if (QTY_ONLY_LINE_RE.test(line)) {
-      const next = lines[i + 1];
-      if (next && PRICE_ONLY_LINE_RE.test(next)) {
-        merged.push(prefix ? `${prefix} ${line} ${next}` : `${line} ${next}`);
-        i++; // the real total line has now been consumed
-        nameBuffer = [];
-        continue;
-      }
-      // No standalone total followed — fall through and use this line's own amount.
-    }
-    merged.push(prefix ? `${prefix} ${line}` : line);
-    nameBuffer = [];
-  }
-  return merged;
-}
-
-/* --------------------------------- category guessing --------------------------------- */
+/* --------------------------------- category guessing (fallback only) --------------------------------- */
+// The AI extraction below picks its own category per item. These are only a safety net —
+// used if the model returns something outside our category list.
 const GROCERY_STORE_RE = /\b(netto|rema\s?1000|fakta|bilka|f[øo]tex|irma|lidl|aldi|meny|spar|super\s?brugsen|kvickly|coop)\b/i;
 const CATEGORY_KEYWORDS = {
   Health: ["håndsprit","handsprit","sprit","medicin","vitamin","paracetamol","apotek","libresse","bind","tampon","plaster"],
@@ -210,113 +139,76 @@ function guessCategory(product, store) {
   return "Other";
 }
 
-function parseReceiptText(raw) {
-  const rawLines = raw
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 1);
+const DEFAULT_CURRENCY = "kr.";
 
-  // Store name is the first line. The address (if any) is whatever plain, price-free
-  // lines directly follow it — pulled out BEFORE merging so they can never get glued
-  // onto the first item's label.
-  const storeLine = rawLines[0] || "Unknown store";
-  const addressLines = [];
-  let bodyStart = 1;
-  for (let i = 1; i < rawLines.length && addressLines.length < 2; i++) {
-    if (TRAILING_PRICE_RE.test(rawLines[i])) break;
-    addressLines.push(rawLines[i]);
-    bodyStart = i + 1;
-  }
-  const location = addressLines.join(", ").slice(0, 80);
+/* --------------------------------- AI vision extraction --------------------------------- */
+function buildExtractionPrompt() {
+  const catList = CATEGORIES.map((c) => c.name).join(", ");
+  return `You are reading a photo of a shop receipt, most likely Danish, sometimes English. Extract structured purchase data, reasoning carefully about which price belongs to which line.
 
-  const lines = mergeMultilineRows(rawLines.slice(bodyStart));
+Rules:
+- Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Net this against the item above it — report that item's price AFTER the discount, and do not list "RABAT" as its own item.
+- Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name and its price are split across lines, still pair them into one item.
+- The store name is the top line. The address (street + postal code/city) is usually the 1-2 lines right under it — put that in "location".
+- Ignore lines for TOTAL, subtotal, VAT/MOMS, payment method (BETALINGSKORT/kort/kontant/MobilePay), till/receipt numbers, staff names, and barcodes — these are not purchased items.
+- The printed TOTAL is ground truth for the receipt's total.
+- Prices are plain numbers using a dot for decimals (convert Danish comma-decimals, e.g. "19,95" -> 19.95).
+- For every item, pick the closest category from exactly this list: ${catList}.
 
-  let items = [];
-  let totalCandidates = [];
-
-  for (const line of lines) {
-    const m = line.match(TRAILING_PRICE_RE);
-    if (!m) continue;
-    const price = parsePriceString(m[1] + (m[2] || ""));
-    if (Number.isNaN(price) || price === 0) continue;
-    const label = line.slice(0, m.index).replace(/[.\-·_\s]+$/, "").trim();
-    const isTotalLine = /\b(total|i\s*alt|ialt)\b/i.test(line);
-    const isSubLine = /\b(subtotal|sub\s*total|delsum)\b/i.test(line);
-
-    if (isTotalLine && !isSubLine) {
-      totalCandidates.push(Math.abs(price));
-      continue;
-    }
-    if (DISCOUNT_RE.test(line) && price < 0) {
-      // Net the discount against the item right above it — that's what was actually paid.
-      if (items.length > 0) items[items.length - 1].price = Math.max(0, items[items.length - 1].price + price);
-      continue;
-    }
-    if (SKIP_WORDS.test(line)) continue;
-    if (!label || label.length < 2 || price < 0) continue;
-    items.push({ id: uid(), product: label, price, category: guessCategory(label, storeLine) });
-  }
-
-  const total = totalCandidates.length
-    ? Math.max(...totalCandidates)
-    : Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
-
-  const date = parseDate(raw) || todayISO();
-  const currency = detectCurrency(raw);
-
-  if (items.length === 0 && total > 0) {
-    items.push({ id: uid(), product: "Purchase", price: total, category: guessCategory("", storeLine) });
-  } else if (totalCandidates.length) {
-    // A printed total is ground truth. If OCR dropped a line or misread it, the item
-    // list won't add up — reconcile so category totals still match what was paid.
-    const itemsSum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
-    const diff = Math.round((total - itemsSum) * 100) / 100;
-    if (diff >= 0.05) {
-      items.push({ id: uid(), product: "Unmatched line(s)", price: diff, category: "Other" });
-    }
-  }
-
-  return { store: storeLine.slice(0, 60), location, date, currency, items, total };
+Return ONLY strict JSON, no markdown fences, no commentary, in exactly this shape:
+{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","items":[{"product":"string","price":number,"category":"one of the list above"}],"total":number}`;
 }
 
-/* --------------------------------- OCR flow ----------------------------------- */
-// Converts to grayscale and binarizes with Otsu's method — thermal receipt photos
-// (uneven lighting, slight glare, faint print) OCR far more reliably as clean black
-// text on white than as a color/contrast-filtered photo.
-function binarize(canvas) {
-  const ctx = canvas.getContext("2d");
-  const { width: w, height: h } = canvas;
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const d = imgData.data;
-  const hist = new Array(256).fill(0);
-  for (let i = 0; i < d.length; i += 4) {
-    const gray = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
-    d[i] = d[i + 1] = d[i + 2] = gray;
-    hist[gray]++;
+async function callClaudeVision(base64) {
+  const apiKey = getApiKey();
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: getModel(),
+      max_tokens: 1500,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+            { type: "text", text: buildExtractionPrompt() },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    let msg = `Request failed (${response.status})`;
+    try {
+      const err = await response.json();
+      msg = err?.error?.message || msg;
+    } catch {}
+    if (response.status === 401) throw new Error("That API key was rejected. Check it in Settings.");
+    if (response.status === 429) throw new Error("Rate limited by Anthropic — wait a moment and try again.");
+    throw new Error(msg);
   }
-  const total = w * h;
-  let sum = 0;
-  for (let t = 0; t < 256; t++) sum += t * hist[t];
-  let sumB = 0, wB = 0, maxVar = 0, threshold = 140;
-  for (let t = 0; t < 256; t++) {
-    wB += hist[t];
-    if (wB === 0) continue;
-    const wF = total - wB;
-    if (wF === 0) break;
-    sumB += t * hist[t];
-    const mB = sumB / wB;
-    const mF = (sum - sumB) / wF;
-    const varBetween = wB * wF * (mB - mF) * (mB - mF);
-    if (varBetween > maxVar) { maxVar = varBetween; threshold = t; }
-  }
-  for (let i = 0; i < d.length; i += 4) {
-    const v = d[i] > threshold ? 255 : 0;
-    d[i] = d[i + 1] = d[i + 2] = v;
-  }
-  ctx.putImageData(imgData, 0, 0);
+
+  const data = await response.json();
+  const text = (data.content || []).map((b) => b.text || "").join("").trim();
+  const clean = text.replace(/```json|```/g, "").trim();
+  const start = clean.indexOf("{");
+  const end = clean.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("The model didn't return readable data — try again.");
+  const parsed = JSON.parse(clean.slice(start, end + 1));
+  if (!Array.isArray(parsed.items)) throw new Error("Malformed response from the model.");
+  return parsed;
 }
 
-function fileToDataUrl(file, maxDim = 1800) {
+// Resizes/compresses for upload. Kept in color — vision models read a real photo far
+// better than a binarized black/white version, unlike on-device OCR.
+function fileToBase64(file, maxDim = 2000) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const reader = new FileReader();
@@ -334,10 +226,8 @@ function fileToDataUrl(file, maxDim = 1800) {
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, width, height);
-      binarize(canvas);
-      resolve(canvas.toDataURL("image/jpeg", 0.9));
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", 0.88).split(",")[1]);
     };
     img.onerror = reject;
     reader.readAsDataURL(file);
@@ -347,28 +237,32 @@ function fileToDataUrl(file, maxDim = 1800) {
 async function handleFile(file) {
   if (!file) return;
   showError(null);
-  showProgress(true, "Loading recognizer…", 0);
+  if (!getApiKey()) {
+    showError("Add your Anthropic API key in Settings (gear icon, top right) before scanning.");
+    openSettings();
+    return;
+  }
+  showProgress(true, "Uploading photo…", 0.15);
   try {
-    const dataUrl = await fileToDataUrl(file);
-    const result = await Tesseract.recognize(dataUrl, "dan+eng", {
-      logger: (m) => {
-        if (m.status && typeof m.progress === "number") {
-          const label = m.status === "recognizing text" ? "Reading text…" : m.status;
-          showProgress(true, label.charAt(0).toUpperCase() + label.slice(1), m.progress);
-        }
-      },
-    });
-    const text = result?.data?.text || "";
-    if (!text.trim()) throw new Error("No text found");
-    const parsed = parseReceiptText(text);
+    const base64 = await fileToBase64(file);
+    showProgress(true, "Reading receipt with AI…", 0.55);
+    const ai = await callClaudeVision(base64);
+    const store = (ai.store || "Unknown store").toString().slice(0, 60);
+    const items = (ai.items || []).map((it) => ({
+      id: uid(),
+      product: (it.product || "Item").toString().slice(0, 80),
+      price: Number(it.price) || 0,
+      category: CATEGORIES.some((c) => c.name === it.category) ? it.category : guessCategory(it.product, store),
+    }));
+    const total = Number(ai.total) || Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
     const receipt = {
       id: uid(),
-      store: parsed.store,
-      location: parsed.location,
-      date: parsed.date,
-      currency: parsed.currency,
-      items: parsed.items,
-      total: parsed.total,
+      store,
+      location: (ai.location || "").toString().slice(0, 80),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(ai.date) ? ai.date : todayISO(),
+      currency: ai.currency || DEFAULT_CURRENCY,
+      items,
+      total,
     };
     persist([receipt, ...receipts]);
     expandedId = receipt.id;
@@ -376,7 +270,7 @@ async function handleFile(file) {
     renderAll();
   } catch (e) {
     console.error(e);
-    showError("Couldn't make out that receipt. Try a flatter, well-lit, closer photo — or add it manually below.");
+    showError(e.message || "Couldn't read that receipt. Try again, or add it manually below.");
   } finally {
     showProgress(false);
   }
@@ -600,7 +494,6 @@ function renderReceipts() {
             </div>
             <div style="text-align:right;">
               <div class="r-total">${Number(r.total).toFixed(2)} <span class="r-currency">${esc(r.currency)}</span></div>
-              ${r.readMethod === "rules" ? `<div style="font-size:9.5px;color:var(--ink-light);margin-top:2px;">quick read · check items</div>` : ""}
             </div>
           </div>
           <div class="r-actions">
@@ -621,6 +514,27 @@ function renderAll() {
   renderChart();
   renderReceipts();
 }
+
+/* ------------------------------------ settings modal ------------------------------------- */
+function openSettings() {
+  const s = loadSettings();
+  document.getElementById("settings-key").value = s.apiKey || "";
+  document.getElementById("settings-model").value = s.model || DEFAULT_MODEL;
+  document.getElementById("settings-modal").style.display = "flex";
+}
+function closeSettings() {
+  document.getElementById("settings-modal").style.display = "none";
+}
+document.getElementById("btn-settings").addEventListener("click", openSettings);
+document.getElementById("settings-backdrop").addEventListener("click", closeSettings);
+document.getElementById("btn-settings-close").addEventListener("click", closeSettings);
+document.getElementById("btn-settings-save").addEventListener("click", () => {
+  const apiKey = document.getElementById("settings-key").value.trim();
+  const model = document.getElementById("settings-model").value;
+  saveSettings({ apiKey, model });
+  closeSettings();
+  showError(null);
+});
 
 /* ------------------------------------ events ------------------------------------- */
 document.getElementById("btn-camera").addEventListener("click", () => document.getElementById("input-camera").click());
