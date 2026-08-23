@@ -278,13 +278,14 @@ Rules:
 - Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the NET amount actually paid AFTER the discount (e.g. 19,95 with a 7,00 rabat -> price 12.95), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Do not list "RABAT" as its own item.
 - Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name and its price are split across lines, still pair them into one item.
 - The store name is the top line. The address (street + postal code/city) is usually the 1-2 lines right under it — put that in "location".
-- Ignore lines for TOTAL, subtotal, VAT/MOMS, payment method (BETALINGSKORT/kort/kontant/MobilePay), till/receipt numbers, staff names, and barcodes — these are not purchased items.
+- Find the receipt/transaction reference — usually printed near the bottom, often a till number, a long numeric string, a timestamp, or a line like "Bon nr" / "Kvittering nr" / "Transaction #". This is what a customer would need to quote for a return or complaint. Put the most complete version of it (with any till/store number alongside it) in "receiptNumber" as plain text, exactly as printed. Use "" if nothing like this is visible.
+- Ignore lines for TOTAL, subtotal, VAT/MOMS, payment method (BETALINGSKORT/kort/kontant/MobilePay), and staff names — these are not purchased items and are not the receipt number.
 - The printed TOTAL is ground truth for the receipt's total.
 - Prices are plain numbers using a dot for decimals (convert Danish comma-decimals, e.g. "19,95" -> 19.95).
 - For every item, pick the closest category from exactly this list: ${catList}.
 
 Return ONLY strict JSON, no markdown fences, no commentary, in exactly this shape:
-{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","items":[{"product":"string","price":number,"discount":number,"category":"one of the list above"}],"total":number}`;
+{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","receiptNumber":"string, exactly as printed, empty if none","items":[{"product":"string","price":number,"discount":number,"category":"one of the list above"}],"total":number}`;
 }
 
 async function callClaudeVision(base64) {
@@ -404,6 +405,7 @@ async function handleFile(file) {
       location: (ai.location || "").toString().slice(0, 80),
       date: /^\d{4}-\d{2}-\d{2}$/.test(ai.date) ? ai.date : todayISO(),
       currency: ai.currency || DEFAULT_CURRENCY,
+      receiptNumber: (ai.receiptNumber || "").toString().slice(0, 60),
       items,
       total,
     };
@@ -842,7 +844,10 @@ function renderReceiptCanvas(r) {
   let bodyLines = 0;
   itemBlocks.forEach((b) => { bodyLines += b.nameLines.length + (b.discountStr ? 1 : 0); });
 
-  const height = 46 + 24 + (r.location ? 18 : 0) + 26 + bodyLines * lineH + 24 + 26 + 22 + 34 + 20;
+  measure.font = FONT_SMALL;
+  const receiptNoLines = r.receiptNumber ? wrapCanvasText(measure, `Ref: ${r.receiptNumber}`, contentW) : [];
+
+  const height = 46 + 24 + (r.location ? 18 : 0) + 26 + bodyLines * lineH + 24 + 26 + 22 + receiptNoLines.length * 16 + 34 + 20;
 
   const canvas = document.createElement("canvas");
   canvas.width = W;
@@ -918,7 +923,20 @@ function renderReceiptCanvas(r) {
   ctx.fillStyle = INK_LIGHT;
   ctx.textAlign = "left";
   ctx.fillText(r.date || "", padX, y);
-  y += 32;
+  y += 20;
+
+  if (receiptNoLines.length) {
+    ctx.font = FONT_SMALL;
+    ctx.fillStyle = INK_LIGHT;
+    ctx.textAlign = "left";
+    receiptNoLines.forEach((line) => {
+      ctx.fillText(line, padX, y);
+      y += 16;
+    });
+    y += 12;
+  } else {
+    y += 12;
+  }
 
   ctx.font = FONT_FOOT;
   ctx.fillStyle = MUTED;
