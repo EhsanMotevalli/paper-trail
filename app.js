@@ -275,7 +275,7 @@ function buildExtractionPrompt() {
   return `You are reading a photo of a shop receipt, most likely Danish, sometimes English. Extract structured purchase data, reasoning carefully about which price belongs to which line.
 
 Rules:
-- Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Net this against the item above it — report that item's price AFTER the discount, and do not list "RABAT" as its own item.
+- Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the NET amount actually paid AFTER the discount (e.g. 19,95 with a 7,00 rabat -> price 12.95), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Do not list "RABAT" as its own item.
 - Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name and its price are split across lines, still pair them into one item.
 - The store name is the top line. The address (street + postal code/city) is usually the 1-2 lines right under it — put that in "location".
 - Ignore lines for TOTAL, subtotal, VAT/MOMS, payment method (BETALINGSKORT/kort/kontant/MobilePay), till/receipt numbers, staff names, and barcodes — these are not purchased items.
@@ -284,7 +284,7 @@ Rules:
 - For every item, pick the closest category from exactly this list: ${catList}.
 
 Return ONLY strict JSON, no markdown fences, no commentary, in exactly this shape:
-{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","items":[{"product":"string","price":number,"category":"one of the list above"}],"total":number}`;
+{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","items":[{"product":"string","price":number,"discount":number,"category":"one of the list above"}],"total":number}`;
 }
 
 async function callClaudeVision(base64) {
@@ -394,6 +394,7 @@ async function handleFile(file) {
       id: uid(),
       product: (it.product || "Item").toString().slice(0, 80),
       price: Number(it.price) || 0,
+      discount: Number(it.discount) || 0, // gross line price = price + discount; used only for the built-receipt reconstruction
       category: CATEGORIES.some((c) => c.name === it.category) ? it.category : guessCategory(it.product, store),
     }));
     const total = Number(ai.total) || Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
@@ -443,21 +444,27 @@ function deleteReceipt(id) {
   receiptsWithPhotos.delete(id);
   delete photoImagesCache[id];
   deleteImage(id);
+  builtReceiptCache.delete(id);
 }
 function updateReceipt(id, patch) {
   persist(receipts.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  builtReceiptCache.delete(id);
 }
 function updateItem(rid, iid, patch) {
   persist(receipts.map((r) => (r.id !== rid ? r : { ...r, items: r.items.map((it) => (it.id === iid ? { ...it, ...patch } : it)) })));
+  builtReceiptCache.delete(rid);
 }
 function removeItem(rid, iid) {
   persist(receipts.map((r) => (r.id !== rid ? r : { ...r, items: r.items.filter((it) => it.id !== iid) })));
+  builtReceiptCache.delete(rid);
 }
 function addItem(rid) {
-  persist(receipts.map((r) => (r.id !== rid ? r : { ...r, items: [...r.items, { id: uid(), product: "Item", price: 0, category: "Other" }] })));
+  persist(receipts.map((r) => (r.id !== rid ? r : { ...r, items: [...r.items, { id: uid(), product: "Item", price: 0, discount: 0, category: "Other" }] })));
+  builtReceiptCache.delete(rid);
 }
 function recalcTotal(rid) {
   persist(receipts.map((r) => (r.id !== rid ? r : { ...r, total: r.items.reduce((s, i) => s + (Number(i.price) || 0), 0) })));
+  builtReceiptCache.delete(rid);
 }
 
 /* ---------------------------------- analytics ---------------------------------- */
@@ -694,7 +701,8 @@ function renderReceipts() {
           <div class="r-actions">
             <button class="btn-icon" data-act="toggle-open" data-id="${r.id}">${isOpen ? "&#9650;" : "&#9660;"} ${r.items.length} item${r.items.length !== 1 ? "s" : ""}</button>
             <button class="btn-icon" data-act="toggle-edit" data-id="${r.id}">${isEditing ? "&#10003; Done" : "&#9998; Edit"}</button>
-            ${receiptsWithPhotos.has(r.id) ? `<button class="btn-icon" data-act="view-photo" data-id="${r.id}" title="View photo">&#128247;</button>` : ""}
+            ${receiptsWithPhotos.has(r.id) ? `<button class="btn-icon" data-act="view-photo" data-id="${r.id}" title="View original photo">&#128247;</button>` : ""}
+            <button class="btn-icon" data-act="view-built" data-id="${r.id}" title="View built receipt">&#129534;</button>
             <button class="btn-icon" data-act="delete" data-id="${r.id}" style="color:#A8321F;margin-left:auto;">&#128465;</button>
           </div>
           ${itemsHtml}
@@ -711,6 +719,7 @@ function renderAll() {
   renderMonthLookup();
   renderSearchOrList();
   if (viewMode === "photos") renderPhotosGrid();
+  if (viewMode === "built") renderBuiltGrid();
 }
 
 /* ------------------------------------ month lookup ------------------------------------- */
@@ -787,7 +796,173 @@ function renderSearchOrList() {
   applyViewVisibility();
 }
 
-/* ------------------------------------ photos tab ------------------------------------- */
+/* ------------------------------------ built-receipt image ------------------------------------- */
+// Renders a clean "reprint" of a receipt as a canvas, mirroring the original's
+// structure: item lines with a RABAT/discount line under any item that had one
+// (older receipts saved before the discount field existed just won't show that row).
+function wrapCanvasText(ctx, text, maxWidth) {
+  const words = String(text || "").split(" ");
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const test = line ? `${line} ${w}` : w;
+    if (line && ctx.measureText(test).width > maxWidth) {
+      lines.push(line);
+      line = w;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+function renderReceiptCanvas(r) {
+  const W = 420;
+  const padX = 26;
+  const contentW = W - padX * 2;
+  const lineH = 22;
+  const FONT_BODY = "14px 'Courier New', monospace";
+  const FONT_STORE = "bold 19px 'Courier New', monospace";
+  const FONT_SMALL = "12px 'Courier New', monospace";
+  const FONT_TOTAL = "bold 16px 'Courier New', monospace";
+  const FONT_FOOT = "italic 10px 'Courier New', monospace";
+  const INK = "#2B2620", INK_LIGHT = "#736B5A", STAMP = "#A8321F", LINE = "#D4CBB8", PAPER = "#F5F1E8", MUTED = "#8A8378";
+
+  // Measuring canvas for layout math before we know final height.
+  const measure = document.createElement("canvas").getContext("2d");
+  measure.font = FONT_BODY;
+  const itemBlocks = (r.items || []).map((it) => {
+    const priceStr = `${Number(it.price).toFixed(2)}`;
+    const priceW = measure.measureText(priceStr).width;
+    const nameLines = wrapCanvasText(measure, it.product, contentW - priceW - 14);
+    const discount = Number(it.discount) || 0;
+    return { nameLines, priceStr, discountStr: discount > 0 ? `-${discount.toFixed(2)}` : null };
+  });
+  let bodyLines = 0;
+  itemBlocks.forEach((b) => { bodyLines += b.nameLines.length + (b.discountStr ? 1 : 0); });
+
+  const height = 46 + 24 + (r.location ? 18 : 0) + 26 + bodyLines * lineH + 24 + 26 + 22 + 34 + 20;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = Math.max(height, 260);
+  const ctx = canvas.getContext("2d");
+
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  let y = 40;
+  ctx.textAlign = "center";
+  ctx.fillStyle = INK;
+  ctx.font = FONT_STORE;
+  ctx.fillText(r.store || "Receipt", W / 2, y);
+  y += 24;
+
+  if (r.location) {
+    ctx.font = FONT_SMALL;
+    ctx.fillStyle = INK_LIGHT;
+    ctx.fillText(r.location, W / 2, y);
+    y += 18;
+  }
+  y += 12;
+
+  const dashLine = () => {
+    ctx.strokeStyle = LINE;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(padX, y);
+    ctx.lineTo(W - padX, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  dashLine();
+  y += 22;
+
+  ctx.textAlign = "left";
+  ctx.font = FONT_BODY;
+  itemBlocks.forEach((b) => {
+    b.nameLines.forEach((nl, i) => {
+      ctx.fillStyle = INK;
+      ctx.textAlign = "left";
+      ctx.fillText(nl, padX, y);
+      if (i === 0) {
+        ctx.textAlign = "right";
+        ctx.fillText(b.priceStr, W - padX, y);
+      }
+      y += lineH;
+    });
+    if (b.discountStr) {
+      ctx.fillStyle = STAMP;
+      ctx.textAlign = "left";
+      ctx.fillText("RABAT", padX + 10, y);
+      ctx.textAlign = "right";
+      ctx.fillText(b.discountStr, W - padX, y);
+      y += lineH;
+    }
+  });
+
+  y += 4;
+  dashLine();
+  y += 26;
+
+  ctx.font = FONT_TOTAL;
+  ctx.fillStyle = INK;
+  ctx.textAlign = "left";
+  ctx.fillText("TOTAL", padX, y);
+  ctx.textAlign = "right";
+  ctx.fillText(`${Number(r.total).toFixed(2)} ${r.currency || ""}`.trim(), W - padX, y);
+  y += 24;
+
+  ctx.font = FONT_SMALL;
+  ctx.fillStyle = INK_LIGHT;
+  ctx.textAlign = "left";
+  ctx.fillText(r.date || "", padX, y);
+  y += 32;
+
+  ctx.font = FONT_FOOT;
+  ctx.fillStyle = MUTED;
+  ctx.textAlign = "center";
+  ctx.fillText("Reconstructed from scanned receipt data", W / 2, y);
+
+  return canvas;
+}
+
+const builtReceiptCache = new Map(); // receiptId -> dataURL, invalidated whenever that receipt changes
+function getBuiltReceiptDataUrl(r) {
+  if (builtReceiptCache.has(r.id)) return builtReceiptCache.get(r.id);
+  const dataUrl = renderReceiptCanvas(r).toDataURL("image/png");
+  builtReceiptCache.set(r.id, dataUrl);
+  return dataUrl;
+}
+
+function downloadDataUrl(dataUrl, filename) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+async function shareDataUrl(dataUrl, filename, title) {
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title });
+      return;
+    }
+  } catch (e) {
+    console.warn("share unavailable, falling back to download:", e);
+  }
+  downloadDataUrl(dataUrl, filename);
+}
+function safeFilename(s) {
+  return String(s || "receipt").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "receipt";
+}
+
+/* ------------------------------------ photos & built-receipts tabs ------------------------------------- */
 async function renderPhotosGrid() {
   const grid = document.getElementById("photos-grid");
   grid.innerHTML = `<div class="empty-state">Loading photos…</div>`;
@@ -811,10 +986,34 @@ async function renderPhotosGrid() {
     .join("");
 }
 
-function openLightbox(id, dataUrl, store, date) {
+function renderBuiltGrid() {
+  const grid = document.getElementById("built-grid");
+  document.getElementById("count-label").textContent = `${receipts.length} built receipt${receipts.length !== 1 ? "s" : ""}`;
+  if (receipts.length === 0) {
+    grid.innerHTML = `<div class="empty-state">No receipts yet — scan one to see it here.</div>`;
+    return;
+  }
+  const sorted = [...receipts].sort((a, b) => (a.date < b.date ? 1 : -1));
+  grid.innerHTML = sorted
+    .map(
+      (r) => `
+    <button class="photo-thumb" data-open-built="${r.id}">
+      <img src="${getBuiltReceiptDataUrl(r)}" alt="${esc(r.store)} built receipt" loading="lazy" />
+      <div class="photo-thumb-label">${esc(r.store)}<br><span>${esc(r.date)}</span></div>
+    </button>`
+    )
+    .join("");
+}
+
+function openLightbox(id, dataUrl, store, date, mode) {
   document.getElementById("lightbox-img").src = dataUrl;
-  document.getElementById("lightbox-caption").textContent = [store, date].filter(Boolean).join(" · ");
+  document.getElementById("lightbox-caption").textContent = [mode === "built" ? "Built receipt" : "Original photo", store, date].filter(Boolean).join(" · ");
   document.getElementById("btn-lightbox-view").dataset.receiptId = id;
+  document.getElementById("btn-lightbox-download").dataset.filename = `${safeFilename(store)}-${date}-${mode}.png`;
+  document.getElementById("btn-lightbox-download").dataset.url = dataUrl;
+  document.getElementById("btn-lightbox-share").dataset.filename = `${safeFilename(store)}-${date}-${mode}.png`;
+  document.getElementById("btn-lightbox-share").dataset.url = dataUrl;
+  document.getElementById("btn-lightbox-share").dataset.title = `${store} receipt`;
   document.getElementById("image-lightbox").style.display = "flex";
 }
 function closeLightbox() {
@@ -829,10 +1028,26 @@ document.getElementById("photos-grid").addEventListener("click", (e) => {
   const r = receipts.find((x) => x.id === id);
   const dataUrl = photoImagesCache[id];
   if (!dataUrl) return;
-  openLightbox(id, dataUrl, r ? r.store : "", r ? r.date : "");
+  openLightbox(id, dataUrl, r ? r.store : "", r ? r.date : "", "photo");
+});
+document.getElementById("built-grid").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-open-built]");
+  if (!btn) return;
+  const id = btn.dataset.openBuilt;
+  const r = receipts.find((x) => x.id === id);
+  if (!r) return;
+  openLightbox(id, getBuiltReceiptDataUrl(r), r.store, r.date, "built");
 });
 document.getElementById("lightbox-backdrop").addEventListener("click", closeLightbox);
 document.getElementById("btn-lightbox-close").addEventListener("click", closeLightbox);
+document.getElementById("btn-lightbox-download").addEventListener("click", (e) => {
+  const { url, filename } = e.currentTarget.dataset;
+  if (url) downloadDataUrl(url, filename);
+});
+document.getElementById("btn-lightbox-share").addEventListener("click", (e) => {
+  const { url, filename, title } = e.currentTarget.dataset;
+  if (url) shareDataUrl(url, filename, title);
+});
 document.getElementById("btn-lightbox-view").addEventListener("click", (e) => {
   const id = e.currentTarget.dataset.receiptId;
   closeLightbox();
@@ -854,15 +1069,17 @@ document.getElementById("view-toggle").addEventListener("click", (e) => {
   document.querySelectorAll("#view-toggle button").forEach((b) => b.classList.toggle("active", b.dataset.view === viewMode));
   applyViewVisibility();
   if (viewMode === "photos") renderPhotosGrid();
+  if (viewMode === "built") renderBuiltGrid();
 });
 
 function applyViewVisibility() {
-  const isPhotos = viewMode === "photos";
   const hasQuery = !!searchQuery;
-  document.getElementById("search-input").style.display = isPhotos ? "none" : "";
-  document.getElementById("search-results").style.display = !isPhotos && hasQuery ? "block" : "none";
-  document.getElementById("receipts-list").style.display = !isPhotos && !hasQuery ? "" : "none";
-  document.getElementById("photos-grid").style.display = isPhotos ? "grid" : "none";
+  const isList = viewMode === "list";
+  document.getElementById("search-input").style.display = isList ? "" : "none";
+  document.getElementById("search-results").style.display = isList && hasQuery ? "block" : "none";
+  document.getElementById("receipts-list").style.display = isList && !hasQuery ? "" : "none";
+  document.getElementById("photos-grid").style.display = viewMode === "photos" ? "grid" : "none";
+  document.getElementById("built-grid").style.display = viewMode === "built" ? "grid" : "none";
 }
 
 /* ------------------------------------ settings modal ------------------------------------- */
@@ -1019,8 +1236,11 @@ document.getElementById("receipts-list").addEventListener("click", async (e) => 
     if (dataUrl) {
       photoImagesCache[id] = dataUrl;
       const r = receipts.find((x) => x.id === id);
-      openLightbox(id, dataUrl, r ? r.store : "", r ? r.date : "");
+      openLightbox(id, dataUrl, r ? r.store : "", r ? r.date : "", "photo");
     }
+  } else if (act === "view-built") {
+    const r = receipts.find((x) => x.id === id);
+    if (r) openLightbox(id, getBuiltReceiptDataUrl(r), r.store, r.date, "built");
   } else if (act === "remove-item") {
     removeItem(btn.dataset.rid, btn.dataset.iid);
   } else if (act === "add-item") {

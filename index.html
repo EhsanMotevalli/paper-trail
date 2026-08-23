@@ -107,6 +107,7 @@
     <div class="view-toggle" id="view-toggle">
       <button data-view="list" class="active">List</button>
       <button data-view="photos">Photos</button>
+      <button data-view="built">Receipts</button>
     </div>
 
     <input id="search-input" class="f search-input" placeholder="🔍 Search items — e.g. mælk, coffee, kylling" />
@@ -115,6 +116,7 @@
     <div class="section-label" id="count-label">0 receipts</div>
     <div id="receipts-list" class="receipts"></div>
     <div id="photos-grid" class="photos-grid" style="display:none;"></div>
+    <div id="built-grid" class="photos-grid" style="display:none;"></div>
   </div>
 
   <div id="image-lightbox" class="modal-overlay" style="display:none;">
@@ -122,12 +124,15 @@
     <div class="lightbox-card">
       <img id="lightbox-img" src="" alt="Receipt photo" />
       <div id="lightbox-caption" class="lightbox-caption"></div>
-      <div class="modal-actions" style="justify-content:space-between;">
+      <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;">
         <button id="btn-lightbox-close" class="btn btn-secondary">Close</button>
+        <button id="btn-lightbox-download" class="btn btn-secondary">⬇ Download</button>
+        <button id="btn-lightbox-share" class="btn btn-secondary">⤴ Share</button>
         <button id="btn-lightbox-view" class="btn btn-primary">View receipt details</button>
       </div>
     </div>
   </div>
+
 
   <script src="app.js"></script>
   <script>
