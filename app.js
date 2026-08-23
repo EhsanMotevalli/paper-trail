@@ -36,6 +36,102 @@ function saveReceipts(list) {
   }
 }
 
+// Receipt photos are stored in IndexedDB, not localStorage — photos are much bigger
+// than the JSON data (localStorage typically caps out around 5-10MB total), and
+// IndexedDB has a far larger quota that's appropriate for images.
+const IMG_DB_NAME = "paperTrailImages";
+const IMG_STORE = "images";
+let imgDbPromise = null;
+function openImageDB() {
+  if (!imgDbPromise) {
+    imgDbPromise = new Promise((resolve, reject) => {
+      if (!("indexedDB" in window)) { reject(new Error("IndexedDB unavailable")); return; }
+      const req = indexedDB.open(IMG_DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(IMG_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return imgDbPromise;
+}
+async function saveImage(id, dataUrl) {
+  try {
+    const db = await openImageDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IMG_STORE, "readwrite");
+      tx.objectStore(IMG_STORE).put(dataUrl, id);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error("saveImage failed", e);
+    return false;
+  }
+}
+async function getImage(id) {
+  try {
+    const db = await openImageDB();
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction(IMG_STORE, "readonly").objectStore(IMG_STORE).get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.error("getImage failed", e);
+    return null;
+  }
+}
+async function deleteImage(id) {
+  try {
+    const db = await openImageDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IMG_STORE, "readwrite");
+      tx.objectStore(IMG_STORE).delete(id);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error("deleteImage failed", e);
+    return false;
+  }
+}
+async function getAllImages() {
+  try {
+    const db = await openImageDB();
+    return await new Promise((resolve, reject) => {
+      const store = db.transaction(IMG_STORE, "readonly").objectStore(IMG_STORE);
+      const result = {};
+      const req = store.openCursor();
+      req.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          result[cursor.key] = cursor.value;
+          cursor.continue();
+        } else {
+          resolve(result);
+        }
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.error("getAllImages failed", e);
+    return {};
+  }
+}
+async function getAllImageKeys() {
+  try {
+    const db = await openImageDB();
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction(IMG_STORE, "readonly").objectStore(IMG_STORE).getAllKeys();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.error("getAllImageKeys failed", e);
+    return [];
+  }
+}
+
 /* ---------------------------------- state ----------------------------------- */
 let receipts = loadReceipts();
 let groups = loadGroups();
@@ -44,6 +140,9 @@ let granularity = "day";
 let expandedId = null;
 let editingId = null;
 let searchQuery = "";
+let viewMode = "list"; // "list" | "photos"
+let receiptsWithPhotos = new Set(); // receipt ids that have a saved photo (for the 📷 badge)
+let photoImagesCache = {}; // receiptId -> dataURL, populated when the Photos tab loads
 
 function persist(next) {
   receipts = next;
@@ -307,6 +406,9 @@ async function handleFile(file) {
       items,
       total,
     };
+    showProgress(true, "Saving photo…", 0.92);
+    const saved = await saveImage(receipt.id, `data:image/jpeg;base64,${base64}`);
+    if (saved) receiptsWithPhotos.add(receipt.id);
     persist([receipt, ...receipts]);
     expandedId = receipt.id;
     editingId = receipt.id;
@@ -338,6 +440,9 @@ function addManual() {
 /* ------------------------------- receipt mutators ------------------------------- */
 function deleteReceipt(id) {
   persist(receipts.filter((r) => r.id !== id));
+  receiptsWithPhotos.delete(id);
+  delete photoImagesCache[id];
+  deleteImage(id);
 }
 function updateReceipt(id, patch) {
   persist(receipts.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -589,6 +694,7 @@ function renderReceipts() {
           <div class="r-actions">
             <button class="btn-icon" data-act="toggle-open" data-id="${r.id}">${isOpen ? "&#9650;" : "&#9660;"} ${r.items.length} item${r.items.length !== 1 ? "s" : ""}</button>
             <button class="btn-icon" data-act="toggle-edit" data-id="${r.id}">${isEditing ? "&#10003; Done" : "&#9998; Edit"}</button>
+            ${receiptsWithPhotos.has(r.id) ? `<button class="btn-icon" data-act="view-photo" data-id="${r.id}" title="View photo">&#128247;</button>` : ""}
             <button class="btn-icon" data-act="delete" data-id="${r.id}" style="color:#A8321F;margin-left:auto;">&#128465;</button>
           </div>
           ${itemsHtml}
@@ -604,6 +710,7 @@ function renderAll() {
   renderChart();
   renderMonthLookup();
   renderSearchOrList();
+  if (viewMode === "photos") renderPhotosGrid();
 }
 
 /* ------------------------------------ month lookup ------------------------------------- */
@@ -646,16 +753,12 @@ function renderMonthLookup() {
 /* ------------------------------------ search ------------------------------------- */
 function renderSearchOrList() {
   const resultsEl = document.getElementById("search-results");
-  const listEl = document.getElementById("receipts-list");
   if (!searchQuery) {
-    resultsEl.style.display = "none";
     resultsEl.innerHTML = "";
-    listEl.style.display = "";
     renderReceipts();
+    applyViewVisibility();
     return;
   }
-  listEl.style.display = "none";
-  resultsEl.style.display = "block";
 
   const q = searchQuery.toLowerCase();
   const matches = flatItems().filter((it) => it.product.toLowerCase().includes(q));
@@ -681,6 +784,85 @@ function renderSearchOrList() {
       </div>`
           )
           .join("");
+  applyViewVisibility();
+}
+
+/* ------------------------------------ photos tab ------------------------------------- */
+async function renderPhotosGrid() {
+  const grid = document.getElementById("photos-grid");
+  grid.innerHTML = `<div class="empty-state">Loading photos…</div>`;
+  photoImagesCache = await getAllImages();
+  const withPhotos = receipts.filter((r) => photoImagesCache[r.id]);
+  document.getElementById("count-label").textContent = `${withPhotos.length} photo${withPhotos.length !== 1 ? "s" : ""}`;
+
+  if (withPhotos.length === 0) {
+    grid.innerHTML = `<div class="empty-state">No saved photos yet — receipts you scan from now on will appear here.</div>`;
+    return;
+  }
+  const sorted = [...withPhotos].sort((a, b) => (a.date < b.date ? 1 : -1));
+  grid.innerHTML = sorted
+    .map(
+      (r) => `
+    <button class="photo-thumb" data-open-photo="${r.id}">
+      <img src="${photoImagesCache[r.id]}" alt="${esc(r.store)} receipt" loading="lazy" />
+      <div class="photo-thumb-label">${esc(r.store)}<br><span>${esc(r.date)}</span></div>
+    </button>`
+    )
+    .join("");
+}
+
+function openLightbox(id, dataUrl, store, date) {
+  document.getElementById("lightbox-img").src = dataUrl;
+  document.getElementById("lightbox-caption").textContent = [store, date].filter(Boolean).join(" · ");
+  document.getElementById("btn-lightbox-view").dataset.receiptId = id;
+  document.getElementById("image-lightbox").style.display = "flex";
+}
+function closeLightbox() {
+  document.getElementById("image-lightbox").style.display = "none";
+  document.getElementById("lightbox-img").src = "";
+}
+
+document.getElementById("photos-grid").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-open-photo]");
+  if (!btn) return;
+  const id = btn.dataset.openPhoto;
+  const r = receipts.find((x) => x.id === id);
+  const dataUrl = photoImagesCache[id];
+  if (!dataUrl) return;
+  openLightbox(id, dataUrl, r ? r.store : "", r ? r.date : "");
+});
+document.getElementById("lightbox-backdrop").addEventListener("click", closeLightbox);
+document.getElementById("btn-lightbox-close").addEventListener("click", closeLightbox);
+document.getElementById("btn-lightbox-view").addEventListener("click", (e) => {
+  const id = e.currentTarget.dataset.receiptId;
+  closeLightbox();
+  viewMode = "list";
+  document.querySelectorAll("#view-toggle button").forEach((b) => b.classList.toggle("active", b.dataset.view === "list"));
+  searchQuery = "";
+  document.getElementById("search-input").value = "";
+  expandedId = id;
+  editingId = null;
+  applyViewVisibility();
+  renderSearchOrList();
+  document.getElementById("receipts-list").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+document.getElementById("view-toggle").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-view]");
+  if (!btn) return;
+  viewMode = btn.dataset.view;
+  document.querySelectorAll("#view-toggle button").forEach((b) => b.classList.toggle("active", b.dataset.view === viewMode));
+  applyViewVisibility();
+  if (viewMode === "photos") renderPhotosGrid();
+});
+
+function applyViewVisibility() {
+  const isPhotos = viewMode === "photos";
+  const hasQuery = !!searchQuery;
+  document.getElementById("search-input").style.display = isPhotos ? "none" : "";
+  document.getElementById("search-results").style.display = !isPhotos && hasQuery ? "block" : "none";
+  document.getElementById("receipts-list").style.display = !isPhotos && !hasQuery ? "" : "none";
+  document.getElementById("photos-grid").style.display = isPhotos ? "grid" : "none";
 }
 
 /* ------------------------------------ settings modal ------------------------------------- */
@@ -813,7 +995,7 @@ document.getElementById("search-results").addEventListener("click", (e) => {
   document.getElementById("receipts-list").scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
-document.getElementById("receipts-list").addEventListener("click", (e) => {
+document.getElementById("receipts-list").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-act]");
   if (!btn) return;
   const act = btn.dataset.act;
@@ -832,6 +1014,13 @@ document.getElementById("receipts-list").addEventListener("click", (e) => {
     renderReceipts();
   } else if (act === "delete") {
     deleteReceipt(id);
+  } else if (act === "view-photo") {
+    const dataUrl = photoImagesCache[id] || (await getImage(id));
+    if (dataUrl) {
+      photoImagesCache[id] = dataUrl;
+      const r = receipts.find((x) => x.id === id);
+      openLightbox(id, dataUrl, r ? r.store : "", r ? r.date : "");
+    }
   } else if (act === "remove-item") {
     removeItem(btn.dataset.rid, btn.dataset.iid);
   } else if (act === "add-item") {
@@ -854,3 +1043,10 @@ document.getElementById("receipts-list").addEventListener("change", (e) => {
 window.addEventListener("resize", () => renderChart());
 
 renderAll();
+
+// Preload which receipts have a saved photo (just the keys, not the images) so the
+// 📷 badge on each card is accurate without having to open the Photos tab first.
+getAllImageKeys().then((keys) => {
+  receiptsWithPhotos = new Set(keys);
+  if (viewMode === "list" && !searchQuery) renderReceipts();
+});
