@@ -38,15 +38,44 @@ function saveReceipts(list) {
 
 /* ---------------------------------- state ----------------------------------- */
 let receipts = loadReceipts();
-let filterCat = "All";
+let groups = loadGroups();
+let currentFilter = { type: "all", value: null, label: "All" }; // type: all | category | group
 let granularity = "day";
 let expandedId = null;
 let editingId = null;
+let searchQuery = "";
 
 function persist(next) {
   receipts = next;
   saveReceipts(receipts);
   renderAll();
+}
+
+const GROUPS_KEY = "paperTrailGroups";
+function loadGroups() {
+  try {
+    return JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+function saveGroups(next) {
+  groups = next;
+  try {
+    localStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
+  } catch (e) {
+    console.error("save groups failed", e);
+  }
+}
+
+// Categories the current filter covers — null means "no filter, everything".
+function activeCategories() {
+  if (currentFilter.type === "category") return [currentFilter.value];
+  if (currentFilter.type === "group") {
+    const g = groups.find((g) => g.id === currentFilter.value);
+    return g ? g.categories : [];
+  }
+  return null;
 }
 
 /* ---------------------------------- dates ------------------------------------ */
@@ -328,28 +357,32 @@ function recalcTotal(rid) {
 
 /* ---------------------------------- analytics ---------------------------------- */
 function flatItems() {
-  return receipts.flatMap((r) => r.items.map((it) => ({ ...it, date: r.date })));
+  return receipts.flatMap((r) => r.items.map((it) => ({ ...it, date: r.date, store: r.store, receiptId: r.id })));
 }
 function quickStats() {
   const items = flatItems();
   const now = new Date();
   const tKey = todayISO();
-  const wKey = (() => {
-    const s = startOfWeek(now);
-    return `${s.getFullYear()}-${pad(s.getMonth() + 1)}-${pad(s.getDate())}`;
-  })();
+  const yKey = shiftPeriod(tKey, "day", -1);
+  const wKey = periodKey(tKey, "week");
+  const pwKey = shiftPeriod(wKey, "week", -1);
   const mKey = tKey.slice(0, 7);
-  let day = 0, week = 0, month = 0;
+  const pmKey = shiftPeriod(mKey, "month", -1);
+  let day = 0, week = 0, month = 0, prevDay = 0, prevWeek = 0, prevMonth = 0;
   for (const it of items) {
     const p = Number(it.price) || 0;
     if (it.date === tKey) day += p;
+    if (it.date === yKey) prevDay += p;
     if (periodKey(it.date, "week") === wKey) week += p;
+    if (periodKey(it.date, "week") === pwKey) prevWeek += p;
     if (it.date.slice(0, 7) === mKey) month += p;
+    if (it.date.slice(0, 7) === pmKey) prevMonth += p;
   }
-  return { day, week, month };
+  return { day, week, month, prevDay, prevWeek, prevMonth };
 }
 function chartData() {
-  const items = flatItems().filter((it) => filterCat === "All" || it.category === filterCat);
+  const cats = activeCategories();
+  const items = flatItems().filter((it) => !cats || cats.includes(it.category));
   const map = {};
   for (const it of items) {
     const k = periodKey(it.date, granularity);
@@ -363,6 +396,26 @@ function chartData() {
     cursor = shiftPeriod(cursor, granularity, -1);
   }
   return keys.map((k) => ({ key: k, label: periodLabel(k, granularity), value: Math.round((map[k] || 0) * 100) / 100 }));
+}
+// Sum for the equivalent window immediately BEFORE the given chart data — used for trend badges.
+function previousWindowSum(data) {
+  if (!data.length) return 0;
+  const cats = activeCategories();
+  const items = flatItems().filter((it) => !cats || cats.includes(it.category));
+  let cursor = shiftPeriod(data[0].key, granularity, -1);
+  const prevKeys = new Set();
+  for (let i = 0; i < data.length; i++) {
+    prevKeys.add(cursor);
+    cursor = shiftPeriod(cursor, granularity, -1);
+  }
+  return items.reduce((s, it) => (prevKeys.has(periodKey(it.date, granularity)) ? s + (Number(it.price) || 0) : s), 0);
+}
+function trendBadge(current, previous) {
+  if (!previous || previous <= 0) return "";
+  const pct = Math.round(((current - previous) / previous) * 100);
+  if (pct === 0) return `<span class="trend-flat">— flat</span>`;
+  const up = pct > 0;
+  return `<span class="${up ? "trend-up" : "trend-down"}">${up ? "▲" : "▼"} ${Math.abs(pct)}%</span>`;
 }
 
 /* ----------------------------------- render ------------------------------------ */
@@ -387,32 +440,55 @@ function showProgress(on, label, progress) {
 }
 
 function renderStats() {
-  const { day, week, month } = quickStats();
-  document.getElementById("stats").innerHTML = ["Today", "This week", "This month"]
-    .map((label, i) => {
-      const val = [day, week, month][i];
-      return `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value">${val.toFixed(2)} <span style="font-size:11px;color:var(--ink-light);font-weight:500;">kr.</span></div></div>`;
-    })
+  const s = quickStats();
+  const cards = [
+    ["Today", s.day, s.prevDay],
+    ["This week", s.week, s.prevWeek],
+    ["This month", s.month, s.prevMonth],
+  ];
+  document.getElementById("stats").innerHTML = cards
+    .map(
+      ([label, val, prev]) => `<div class="stat-card">
+        <div class="stat-label">${label}</div>
+        <div class="stat-value">${val.toFixed(2)} <span style="font-size:11px;color:var(--ink-light);font-weight:500;">kr.</span></div>
+        <div style="font-size:10px;margin-top:3px;">${trendBadge(val, prev)}</div>
+      </div>`
+    )
     .join("");
 }
 
 function renderChips() {
-  const all = [{ name: "All", color: "#2B2620" }, ...CATEGORIES];
-  document.getElementById("chips").innerHTML = all
-    .map((c) => {
-      const active = filterCat === c.name;
-      const style = active ? `background:${c.color};border-color:${c.color};` : "";
-      return `<button class="chip ${active ? "active" : ""}" style="${style}" data-cat="${esc(c.name)}">${esc(c.name)}</button>`;
+  const allActive = currentFilter.type === "all";
+  const catChips = CATEGORIES.map((c) => {
+    const active = currentFilter.type === "category" && currentFilter.value === c.name;
+    const style = active ? `background:${c.color};border-color:${c.color};` : "";
+    return `<button class="chip ${active ? "active" : ""}" style="${style}" data-filter-cat="${esc(c.name)}">${esc(c.name)}</button>`;
+  }).join("");
+  const groupChips = groups
+    .map((g) => {
+      const active = currentFilter.type === "group" && currentFilter.value === g.id;
+      const style = active ? `background:#2B2620;border-color:#2B2620;` : "";
+      return `<span class="chip ${active ? "active" : ""}" style="${style}display:inline-flex;align-items:center;padding-right:2px;">
+        <span data-filter-group="${g.id}" style="padding-right:4px;">${esc(g.name)}</span>
+        <button class="chip-remove" data-remove-group="${g.id}" title="Delete group" style="${active ? "color:white;" : ""}">&times;</button>
+      </span>`;
     })
     .join("");
+  document.getElementById("chips").innerHTML =
+    `<button class="chip ${allActive ? "active" : ""}" style="${allActive ? "background:#2B2620;border-color:#2B2620;" : ""}" data-filter-all>All</button>` +
+    catChips +
+    groupChips +
+    `<button class="chip chip-add" data-add-group>+ Group</button>`;
 }
 
 function renderChart() {
   const data = chartData();
   const total = data.reduce((s, d) => s + d.value, 0);
+  const prevTotal = previousWindowSum(data);
   document.getElementById("panel-total-label").textContent =
-    `${filterCat === "All" ? "Total" : filterCat} · last ${data.length} ${granularity === "day" ? "days" : granularity === "week" ? "weeks" : "months"}`;
-  document.getElementById("panel-total-value").textContent = `${total.toFixed(2)} kr.`;
+    `${currentFilter.label} · last ${data.length} ${granularity === "day" ? "days" : granularity === "week" ? "weeks" : "months"}`;
+  document.getElementById("panel-total-value").innerHTML =
+    `${total.toFixed(2)} kr. <span style="font-size:12px;margin-left:4px;">${trendBadge(total, prevTotal)}</span>`;
 
   document.querySelectorAll("#gtoggle button").forEach((b) => b.classList.toggle("active", b.dataset.g === granularity));
 
@@ -422,7 +498,7 @@ function renderChart() {
   const n = data.length;
   const gap = 4;
   const barW = (w - gap * (n - 1)) / n;
-  const color = filterCat === "All" ? "#3D5C43" : catColor(filterCat);
+  const color = currentFilter.type === "category" ? catColor(currentFilter.value) : "#3D5C43";
 
   let bars = "";
   let labels = "";
@@ -526,7 +602,85 @@ function renderAll() {
   renderStats();
   renderChips();
   renderChart();
-  renderReceipts();
+  renderMonthLookup();
+  renderSearchOrList();
+}
+
+/* ------------------------------------ month lookup ------------------------------------- */
+function renderMonthLookup() {
+  const picker = document.getElementById("month-picker");
+  const val = picker.value || todayISO().slice(0, 7);
+  if (!picker.value) picker.value = val;
+
+  const items = flatItems().filter((it) => it.date.slice(0, 7) === val);
+  const total = items.reduce((s, i) => s + (Number(i.price) || 0), 0);
+  const byCat = {};
+  for (const it of items) byCat[it.category] = (byCat[it.category] || 0) + (Number(it.price) || 0);
+  const rows = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  const maxCat = Math.max(1, ...rows.map((r) => r[1]));
+
+  const [y, m] = val.split("-");
+  const monthLabel = new Date(Number(y), Number(m) - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  document.getElementById("month-results").innerHTML = `
+    <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:24px;margin-top:8px;">${total.toFixed(2)} kr.</div>
+    <div style="font-size:11px;color:var(--ink-light);margin-bottom:14px;">${esc(monthLabel)}${items.length ? ` · ${items.length} item${items.length !== 1 ? "s" : ""}` : ""}</div>
+    ${
+      rows.length === 0
+        ? `<div class="empty-state" style="padding:6px 0 4px;">No spending recorded that month.</div>`
+        : rows
+            .map(
+              ([cat, amt]) => `
+        <div class="month-cat-row">
+          <span class="dot" style="background:${catColor(cat)}"></span>
+          <span style="flex:1;">${esc(cat)}</span>
+          <span style="color:var(--ink-light);">${amt.toFixed(2)} kr.</span>
+        </div>
+        <div class="month-cat-bar-track"><div class="month-cat-bar-fill" style="width:${Math.round((amt / maxCat) * 100)}%;background:${catColor(cat)};"></div></div>`
+            )
+            .join("")
+    }
+  `;
+}
+
+/* ------------------------------------ search ------------------------------------- */
+function renderSearchOrList() {
+  const resultsEl = document.getElementById("search-results");
+  const listEl = document.getElementById("receipts-list");
+  if (!searchQuery) {
+    resultsEl.style.display = "none";
+    resultsEl.innerHTML = "";
+    listEl.style.display = "";
+    renderReceipts();
+    return;
+  }
+  listEl.style.display = "none";
+  resultsEl.style.display = "block";
+
+  const q = searchQuery.toLowerCase();
+  const matches = flatItems().filter((it) => it.product.toLowerCase().includes(q));
+  matches.sort((a, b) => (a.date < b.date ? 1 : -1));
+  const totalSpent = matches.reduce((s, m) => s + (Number(m.price) || 0), 0);
+
+  document.getElementById("count-label").textContent = `${matches.length} match${matches.length !== 1 ? "es" : ""} for "${searchQuery}"`;
+
+  resultsEl.innerHTML =
+    matches.length === 0
+      ? `<div class="empty-state">No items match "${esc(searchQuery)}".</div>`
+      : `<div class="search-summary">Total on matches: <strong style="color:var(--ink);">${totalSpent.toFixed(2)} kr.</strong></div>` +
+        matches
+          .map(
+            (m) => `
+      <div class="search-result" data-open-receipt="${m.receiptId}">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="dot" style="background:${catColor(m.category)}"></span>
+          <span style="flex:1;font-size:13px;">${esc(m.product)}</span>
+          <span style="font-weight:600;font-size:13px;">${Number(m.price).toFixed(2)} kr.</span>
+        </div>
+        <div style="font-size:11px;color:var(--ink-light);margin-left:15px;margin-top:2px;">${esc(m.store)} · ${esc(m.date)}</div>
+      </div>`
+          )
+          .join("");
 }
 
 /* ------------------------------------ settings modal ------------------------------------- */
@@ -566,17 +720,97 @@ dz.addEventListener("drop", (e) => {
 });
 
 document.getElementById("chips").addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-cat]");
-  if (!btn) return;
-  filterCat = btn.dataset.cat;
+  if (e.target.closest("[data-filter-all]")) {
+    currentFilter = { type: "all", value: null, label: "All" };
+    renderChips();
+    renderChart();
+    return;
+  }
+  const catBtn = e.target.closest("[data-filter-cat]");
+  if (catBtn) {
+    currentFilter = { type: "category", value: catBtn.dataset.filterCat, label: catBtn.dataset.filterCat };
+    renderChips();
+    renderChart();
+    return;
+  }
+  const removeBtn = e.target.closest("[data-remove-group]");
+  if (removeBtn) {
+    const id = removeBtn.dataset.removeGroup;
+    const g = groups.find((g) => g.id === id);
+    if (g && confirm(`Delete the "${g.name}" group? (This won't delete any receipts.)`)) {
+      saveGroups(groups.filter((g) => g.id !== id));
+      if (currentFilter.type === "group" && currentFilter.value === id) {
+        currentFilter = { type: "all", value: null, label: "All" };
+      }
+      renderChips();
+      renderChart();
+    }
+    return;
+  }
+  const groupBtn = e.target.closest("[data-filter-group]");
+  if (groupBtn) {
+    const id = groupBtn.dataset.filterGroup;
+    const g = groups.find((g) => g.id === id);
+    if (g) {
+      currentFilter = { type: "group", value: g.id, label: g.name };
+      renderChips();
+      renderChart();
+    }
+    return;
+  }
+  if (e.target.closest("[data-add-group]")) {
+    openGroupForm();
+  }
+});
+
+function openGroupForm() {
+  document.getElementById("group-cat-checks").innerHTML = CATEGORIES.map(
+    (c) => `<label class="group-cat-check"><input type="checkbox" value="${esc(c.name)}"> ${esc(c.name)}</label>`
+  ).join("");
+  document.getElementById("group-name").value = "";
+  document.getElementById("group-form").style.display = "block";
+}
+function closeGroupForm() {
+  document.getElementById("group-form").style.display = "none";
+}
+document.getElementById("btn-group-cancel").addEventListener("click", closeGroupForm);
+document.getElementById("btn-group-save").addEventListener("click", () => {
+  const name = document.getElementById("group-name").value.trim();
+  const checked = Array.from(document.querySelectorAll("#group-cat-checks input:checked")).map((el) => el.value);
+  if (!name || checked.length === 0) {
+    alert("Give the group a name and pick at least one category.");
+    return;
+  }
+  const g = { id: uid(), name: name.slice(0, 24), categories: checked };
+  saveGroups([...groups, g]);
+  currentFilter = { type: "group", value: g.id, label: g.name };
+  closeGroupForm();
   renderChips();
   renderChart();
 });
+
 document.getElementById("gtoggle").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-g]");
   if (!btn) return;
   granularity = btn.dataset.g;
   renderChart();
+});
+
+document.getElementById("month-picker").addEventListener("change", renderMonthLookup);
+
+document.getElementById("search-input").addEventListener("input", (e) => {
+  searchQuery = e.target.value.trim();
+  renderSearchOrList();
+});
+document.getElementById("search-results").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-open-receipt]");
+  if (!el) return;
+  document.getElementById("search-input").value = "";
+  searchQuery = "";
+  expandedId = el.dataset.openReceipt;
+  editingId = null;
+  renderSearchOrList();
+  document.getElementById("receipts-list").scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
 document.getElementById("receipts-list").addEventListener("click", (e) => {
