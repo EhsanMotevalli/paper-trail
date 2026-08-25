@@ -423,15 +423,20 @@ const DEFAULT_CURRENCY = "kr.";
 /* --------------------------------- AI vision extraction --------------------------------- */
 function buildExtractionPrompt() {
   const catList = CATEGORIES.map((c) => c.name).join(", ");
+  const todayStr = todayISO();
   return `You are reading a photo of a shop receipt, most likely Danish, sometimes English. Extract structured purchase data, reasoning carefully about which price belongs to which line. Be exhaustive — read every single purchased line on the receipt, including small print, faint thermal-print text, and lines near the edges of the photo. Missing an item is a real error, not an acceptable shortcut. Never invent a product that isn't actually printed on the receipt.
+
+Today's date is ${todayStr} — use this only to resolve ambiguous 2-digit years on the receipt (e.g. "26" almost certainly means 2026, not some other century), never as a fallback value to fill in when you can't find a date.
 
 Rules:
 - Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the NET amount actually paid AFTER the discount (e.g. 19,95 with a 7,00 rabat -> price 12.95), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Do not list "RABAT" as its own item.
 - Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name and its price are split across lines (including a name that wraps across 2 printed lines before its price appears), still pair all of it into ONE single item — never split one product into two separate item entries, and never let a "2 x N,00" quantity line become its own item separate from the product it belongs to.
 - Work top-to-bottom in strict printed order and keep each product name aligned with the price on the same printed row. If a row's price is hard to read, look at neighboring rows to sanity-check your alignment hasn't drifted — a common mistake is prices sliding down or up by one row partway through a long receipt.
 - The store name is the top line. The address (street + postal code/city) is usually the 1-2 lines right under it — put that in "location".
-- Find the receipt/transaction reference — usually printed near the bottom, often a till number, a long numeric string, a timestamp, or a line like "Bon nr" / "Kvittering nr" / "Transaction #". This is what a customer would need to quote for a return or complaint. Put the most complete version of it (with any till/store number alongside it) in "receiptNumber" as plain text, exactly as printed. Use "" if nothing like this is visible.
+- The purchase DATE is easy to misread because it's often crammed into one small footer line alongside unrelated numbers — e.g. a Danish receipt line like "25 1 927 17 08 26 16:04" mixes a till number ("25"), a cashier/register number ("1"), a receipt/bon number ("927"), THEN the actual date as DD MM YY ("17 08 26" = 17 August 2026), and finally the time ("16:04"). Only the DD MM YY portion is the date — do not mistake the till/cashier/bon numbers for part of it. If a clearer, separately-printed date exists elsewhere on the receipt, prefer that instead.
+- Find the receipt/transaction reference — usually the same busy footer line described above, or a "Bon nr" / "Kvittering nr" / "Transaction #" line. This is what a customer would need to quote for a return or complaint. Put the most complete version of it (till/cashier/bon numbers together) in "receiptNumber" as plain text, exactly as printed — this field CAN include those numbers, they just don't belong in "date". Use "" if nothing like this is visible.
 - Find the payment method line, usually near the total — e.g. "Betalingskort", "VISA", "Dankort", "Mastercard", "MobilePay", "Kontant/Cash" — often followed by a partially masked card number the STORE has already printed masked for security, like "**** **** **** 1234" or "xxxx1234". Copy this masked payment line exactly as printed (never invent or unmask digits — only transcribe what's already partially hidden on the receipt) into "paymentMethod". Use "" if paid in cash or nothing is visible.
+- If there's a barcode near the bottom of the receipt, it usually has its own human-readable number printed directly below or beside the bars (the same digits the barcode itself encodes). Transcribe that digit/character string exactly into "barcodeNumber". Use "" if there's no barcode or no readable number under it — never guess or invent digits you can't actually read.
 - Ignore lines for TOTAL, subtotal, and VAT/MOMS — these are not purchased items and are not the receipt number or payment method.
 - Find the printed TOTAL and report it exactly in the "total" field — it's usually one bold, isolated line near the bottom, and is the single most important number to get right.
 - Before finalizing, add up the "price" of every item yourself and compare it to the printed TOTAL you found. If your items don't sum to the total, re-examine the receipt: you likely misread a price, merged a multi-line item incorrectly, duplicated a quantity line as its own item, or skipped something — fix it so your item list actually reconciles with the printed total as closely as possible.
@@ -439,7 +444,7 @@ Rules:
 - For every item, pick the closest category from exactly this list: ${catList}.
 
 Return ONLY strict JSON, no markdown fences, no commentary, in exactly this shape:
-{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","receiptNumber":"string, exactly as printed, empty if none","paymentMethod":"string, exactly as printed (already-masked card ok), empty if none","items":[{"product":"string","price":number,"discount":number,"category":"one of the list above"}],"total":number}`;
+{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","receiptNumber":"string, exactly as printed, empty if none","paymentMethod":"string, exactly as printed (already-masked card ok), empty if none","barcodeNumber":"digits/characters printed under the barcode, empty if none","items":[{"product":"string","price":number,"discount":number,"category":"one of the list above"}],"total":number}`;
 }
 
 async function callClaudeVision(base64) {
@@ -556,10 +561,17 @@ async function handleFile(file) {
       id: uid(),
       store,
       location: (ai.location || "").toString().slice(0, 80),
-      date: /^\d{4}-\d{2}-\d{2}$/.test(ai.date) ? ai.date : todayISO(),
+      date: (() => {
+        const d = String(ai.date || "");
+        // A receipt can't be dated in the future — that's a sign the model latched onto
+        // an unrelated number (till/bon number, etc.) instead of the actual date.
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d <= todayISO()) return d;
+        return todayISO();
+      })(),
       currency: ai.currency || DEFAULT_CURRENCY,
       receiptNumber: (ai.receiptNumber || "").toString().slice(0, 60),
       paymentMethod: (ai.paymentMethod || "").toString().slice(0, 60),
+      barcodeNumber: (ai.barcodeNumber || "").toString().replace(/[^\w-]/g, "").slice(0, 40),
       items,
       total,
     };
@@ -1007,7 +1019,39 @@ function renderReceiptCanvas(r) {
   const receiptNoLines = r.receiptNumber ? wrapCanvasText(measure, `${t("refLabel")} ${r.receiptNumber}`, contentW) : [];
   const paymentLines = r.paymentMethod ? wrapCanvasText(measure, r.paymentMethod, contentW) : [];
 
-  const height = 46 + 24 + (r.location ? 18 : 0) + 26 + bodyLines * lineH + 24 + 26 + 22 + receiptNoLines.length * 16 + paymentLines.length * 16 + 34 + 20;
+  // Generate the barcode once up front (if any) so we know how much vertical space to
+  // reserve for it before creating the final canvas.
+  let barcodeCanvas = null;
+  let barcodeDrawW = 0;
+  let barcodeDrawH = 0;
+  if (r.barcodeNumber && window.JsBarcode) {
+    try {
+      const tmp = document.createElement("canvas");
+      window.JsBarcode(tmp, r.barcodeNumber, {
+        format: "CODE128",
+        width: 2,
+        height: 36,
+        displayValue: true,
+        fontSize: 11,
+        fontOptions: "",
+        font: "'Courier New', monospace",
+        margin: 4,
+        background: PAPER,
+        lineColor: INK,
+      });
+      const barcodeMaxW = contentW - 20;
+      const scale = Math.min(1, barcodeMaxW / tmp.width);
+      barcodeCanvas = tmp;
+      barcodeDrawW = tmp.width * scale;
+      barcodeDrawH = tmp.height * scale;
+    } catch (e) {
+      console.warn("Barcode generation failed, skipping:", e);
+      barcodeCanvas = null;
+    }
+  }
+  const barcodeBlockH = barcodeCanvas ? barcodeDrawH + 18 : 0;
+
+  const height = 46 + 24 + (r.location ? 18 : 0) + 26 + bodyLines * lineH + 24 + 26 + 22 + receiptNoLines.length * 16 + paymentLines.length * 16 + barcodeBlockH + 34 + 20;
   const logicalHeight = Math.max(height, 260);
 
   // Render at 2x pixel density so the image stays crisp when zoomed in — long receipts
@@ -1111,6 +1155,11 @@ function renderReceiptCanvas(r) {
     y += 12;
   } else {
     y += 12;
+  }
+
+  if (barcodeCanvas) {
+    ctx.drawImage(barcodeCanvas, padX + (contentW - barcodeDrawW) / 2, y, barcodeDrawW, barcodeDrawH);
+    y += barcodeDrawH + 18;
   }
 
   ctx.font = FONT_FOOT;

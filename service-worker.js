@@ -1,4 +1,4 @@
-const CACHE = "paper-trail-v14";
+const CACHE = "paper-trail-v17";
 const SHELL = [
   "./",
   "./index.html",
