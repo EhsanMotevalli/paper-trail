@@ -225,7 +225,7 @@ function shiftPeriod(key, g, delta) {
 // proxy, which holds the real key server-side. All we keep locally is a display name
 // (so the owner can see per-person usage) and a model preference.
 const SETTINGS_KEY = "paperTrailSettings";
-const DEFAULT_MODEL = "claude-sonnet-5";
+const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 function loadSettings() {
   try {
     return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
@@ -245,6 +245,154 @@ function getUserName() {
 }
 function getModel() {
   return loadSettings().model || DEFAULT_MODEL;
+}
+
+/* --------------------------------- translations --------------------------------- */
+function getLang() {
+  return loadSettings().lang || "en";
+}
+const TRANSLATIONS = {
+  en: {
+    tagline: "every receipt, accounted for",
+    settingsTitle: "Settings", yourName: "Your name", namePlaceholder: "e.g. Sara",
+    nameHint: "Just so the app owner can tell testers apart in the usage log — nothing else is shared. No API key needed; scans are billed to the owner's account.",
+    model: "Model", modelHaiku: "Claude Haiku 4.5 — fast & cheap (recommended)", modelSonnet: "Claude Sonnet 5 — most accurate",
+    language: "Language", cancel: "Cancel", save: "Save",
+    dzHint: "Drop a receipt image, or —", takePhoto: "Take photo", upload: "Upload", addManually: "Add manually",
+    readingReceipt: "Reading your receipt…", groupNamePlaceholder: "Group name (e.g. Home)", createGroup: "Create group",
+    total: "Total", day: "Day", week: "Week", month: "Month", lookUpMonth: "Look up a month",
+    listView: "List", photosView: "Photos", builtView: "Receipts",
+    searchPlaceholder: "🔍 Search items — e.g. mælk, coffee, kylling",
+    close: "Close", download: "Download", share: "Share", viewReceiptDetails: "View receipt details",
+    statToday: "Today", statWeek: "This week", statMonth: "This month", flat: "— flat",
+    daysWord: "days", weeksWord: "weeks", monthsWord: "months",
+    nothingFiled: "Nothing filed yet. Scan your first receipt above.", addItem: "+ add item",
+    viewOriginalPhoto: "View original photo", viewBuiltReceipt: "View built receipt",
+    editLabel: "✎ Edit", doneLabel: "✓ Done",
+    noItemsMatchPrefix: "No items match", totalOnMatches: "Total on matches:",
+    noSpendingRecorded: "No spending recorded that month.",
+    noSavedPhotos: "No saved photos yet — receipts you scan from now on will appear here.",
+    noBuiltReceipts: "No receipts yet — scan one to see it here.",
+    deleteGroupConfirm: (name) => `Delete the "${name}" group? (This won't delete any receipts.)`,
+    groupFormAlert: "Give the group a name and pick at least one category.",
+    enterNameError: "Enter your name in Settings (gear icon, top right) so the owner can see usage — takes 2 seconds.",
+    enterNameAlert: "Enter a name — it's how the owner tells testers apart in the usage log.",
+    couldntRead: "Couldn't read that receipt. Try again, or add it manually below.",
+    scanLimitReached: "Scan limit reached — ask the app owner to raise it.",
+    refLabel: "Ref:", reconstructedFooter: "Reconstructed from scanned receipt data",
+    uploadingPhoto: "Uploading photo…", readingWithAI: "Reading receipt with AI…", savingPhoto: "Saving photo…", working: "Working…",
+    requestFailed: (s) => `Request failed (${s})`,
+    allChip: "All", addGroupChip: "+ Group",
+    receiptWord: "receipt", receiptsWord: "receipts", itemWord: "item", itemsWord: "items",
+    matchWord: "match", matchesWord: "matches", photoWord: "photo", photosWord: "photos",
+    builtReceiptWord: "built receipt", builtReceiptsWord: "built receipts",
+    originalPhotoLabel: "Original photo", builtReceiptLabel: "Built receipt", forWord: "for",
+  },
+  da: {
+    tagline: "hver kvittering, gjort op",
+    settingsTitle: "Indstillinger", yourName: "Dit navn", namePlaceholder: "f.eks. Sara",
+    nameHint: "Så ejeren kan kende testerne fra hinanden i forbrugsloggen — intet andet deles. Ingen API-nøgle nødvendig; scanninger betales af ejeren.",
+    model: "Model", modelHaiku: "Claude Haiku 4.5 — hurtig & billig (anbefalet)", modelSonnet: "Claude Sonnet 5 — mest præcis",
+    language: "Sprog", cancel: "Annullér", save: "Gem",
+    dzHint: "Træk et kvitteringsbillede herind, eller —", takePhoto: "Tag foto", upload: "Upload", addManually: "Tilføj manuelt",
+    readingReceipt: "Læser din kvittering…", groupNamePlaceholder: "Gruppenavn (f.eks. Hjem)", createGroup: "Opret gruppe",
+    total: "Total", day: "Dag", week: "Uge", month: "Måned", lookUpMonth: "Slå en måned op",
+    listView: "Liste", photosView: "Fotos", builtView: "Kvitteringer",
+    searchPlaceholder: "🔍 Søg i varer — f.eks. mælk, kaffe, kylling",
+    close: "Luk", download: "Download", share: "Del", viewReceiptDetails: "Se kvitteringsdetaljer",
+    statToday: "I dag", statWeek: "Denne uge", statMonth: "Denne måned", flat: "— uændret",
+    daysWord: "dage", weeksWord: "uger", monthsWord: "måneder",
+    nothingFiled: "Intet arkiveret endnu. Scan din første kvittering ovenfor.", addItem: "+ tilføj vare",
+    viewOriginalPhoto: "Se originalt foto", viewBuiltReceipt: "Se opbygget kvittering",
+    editLabel: "✎ Redigér", doneLabel: "✓ Færdig",
+    noItemsMatchPrefix: "Ingen varer matcher", totalOnMatches: "Total for match:",
+    noSpendingRecorded: "Intet forbrug registreret den måned.",
+    noSavedPhotos: "Ingen gemte fotos endnu — kvitteringer du scanner fremover vises her.",
+    noBuiltReceipts: "Ingen kvitteringer endnu — scan én for at se den her.",
+    deleteGroupConfirm: (name) => `Slet gruppen "${name}"? (Dette sletter ikke nogen kvitteringer.)`,
+    groupFormAlert: "Giv gruppen et navn og vælg mindst én kategori.",
+    enterNameError: "Indtast dit navn i Indstillinger (tandhjul, øverst til højre), så ejeren kan se forbrug — tager 2 sekunder.",
+    enterNameAlert: "Indtast et navn — det er sådan ejeren kender testerne fra hinanden i forbrugsloggen.",
+    couldntRead: "Kunne ikke læse den kvittering. Prøv igen, eller tilføj den manuelt nedenfor.",
+    scanLimitReached: "Scanningsgrænse nået — bed ejeren om at hæve den.",
+    refLabel: "Ref:", reconstructedFooter: "Genskabt fra scannede kvitteringsdata",
+    uploadingPhoto: "Uploader foto…", readingWithAI: "Læser kvittering med AI…", savingPhoto: "Gemmer foto…", working: "Arbejder…",
+    requestFailed: (s) => `Forespørgsel fejlede (${s})`,
+    allChip: "Alle", addGroupChip: "+ Gruppe",
+    receiptWord: "kvittering", receiptsWord: "kvitteringer", itemWord: "vare", itemsWord: "varer",
+    matchWord: "match", matchesWord: "matches", photoWord: "foto", photosWord: "fotos",
+    builtReceiptWord: "opbygget kvittering", builtReceiptsWord: "opbyggede kvitteringer",
+    originalPhotoLabel: "Originalt foto", builtReceiptLabel: "Opbygget kvittering", forWord: "for",
+  },
+  de: {
+    tagline: "jeder Beleg, erfasst",
+    settingsTitle: "Einstellungen", yourName: "Dein Name", namePlaceholder: "z. B. Sara",
+    nameHint: "Nur damit der Besitzer die Tester im Nutzungsprotokoll unterscheiden kann — sonst wird nichts geteilt. Kein API-Schlüssel nötig; Scans werden dem Besitzer berechnet.",
+    model: "Modell", modelHaiku: "Claude Haiku 4.5 — schnell & günstig (empfohlen)", modelSonnet: "Claude Sonnet 5 — am genauesten",
+    language: "Sprache", cancel: "Abbrechen", save: "Speichern",
+    dzHint: "Beleg-Foto hierher ziehen, oder —", takePhoto: "Foto aufnehmen", upload: "Hochladen", addManually: "Manuell hinzufügen",
+    readingReceipt: "Beleg wird gelesen…", groupNamePlaceholder: "Gruppenname (z. B. Zuhause)", createGroup: "Gruppe erstellen",
+    total: "Gesamt", day: "Tag", week: "Woche", month: "Monat", lookUpMonth: "Monat nachschlagen",
+    listView: "Liste", photosView: "Fotos", builtView: "Belege",
+    searchPlaceholder: "🔍 Artikel suchen — z. B. Milch, Kaffee, Hähnchen",
+    close: "Schließen", download: "Herunterladen", share: "Teilen", viewReceiptDetails: "Belegdetails ansehen",
+    statToday: "Heute", statWeek: "Diese Woche", statMonth: "Dieser Monat", flat: "— unverändert",
+    daysWord: "Tage", weeksWord: "Wochen", monthsWord: "Monate",
+    nothingFiled: "Noch nichts erfasst. Scanne oben deinen ersten Beleg.", addItem: "+ Artikel hinzufügen",
+    viewOriginalPhoto: "Originalfoto ansehen", viewBuiltReceipt: "Erstellten Beleg ansehen",
+    editLabel: "✎ Bearbeiten", doneLabel: "✓ Fertig",
+    noItemsMatchPrefix: "Keine Artikel passen zu", totalOnMatches: "Summe der Treffer:",
+    noSpendingRecorded: "Für diesen Monat sind keine Ausgaben erfasst.",
+    noSavedPhotos: "Noch keine gespeicherten Fotos — künftig gescannte Belege erscheinen hier.",
+    noBuiltReceipts: "Noch keine Belege — scanne einen, um ihn hier zu sehen.",
+    deleteGroupConfirm: (name) => `Gruppe "${name}" löschen? (Belege werden dadurch nicht gelöscht.)`,
+    groupFormAlert: "Gib der Gruppe einen Namen und wähle mindestens eine Kategorie.",
+    enterNameError: "Gib deinen Namen in den Einstellungen ein (Zahnrad oben rechts), damit der Besitzer die Nutzung sehen kann — dauert 2 Sekunden.",
+    enterNameAlert: "Gib einen Namen ein — so kann der Besitzer Tester im Nutzungsprotokoll unterscheiden.",
+    couldntRead: "Der Beleg konnte nicht gelesen werden. Versuch es erneut oder füge ihn unten manuell hinzu.",
+    scanLimitReached: "Scan-Limit erreicht — bitte den Besitzer, es zu erhöhen.",
+    refLabel: "Ref.:", reconstructedFooter: "Aus gescannten Belegdaten rekonstruiert",
+    uploadingPhoto: "Foto wird hochgeladen…", readingWithAI: "Beleg wird mit KI gelesen…", savingPhoto: "Foto wird gespeichert…", working: "Wird verarbeitet…",
+    requestFailed: (s) => `Anfrage fehlgeschlagen (${s})`,
+    allChip: "Alle", addGroupChip: "+ Gruppe",
+    receiptWord: "Beleg", receiptsWord: "Belege", itemWord: "Artikel", itemsWord: "Artikel",
+    matchWord: "Treffer", matchesWord: "Treffer", photoWord: "Foto", photosWord: "Fotos",
+    builtReceiptWord: "erstellter Beleg", builtReceiptsWord: "erstellte Belege",
+    originalPhotoLabel: "Originalfoto", builtReceiptLabel: "Erstellter Beleg", forWord: "für",
+  },
+};
+function t(key) {
+  const dict = TRANSLATIONS[getLang()] || TRANSLATIONS.en;
+  const val = dict[key];
+  return val !== undefined ? val : TRANSLATIONS.en[key];
+}
+// Simple singular/plural for short UI counts (not fully general, but covers our nouns).
+function plural(n, singularKey, pluralKey) {
+  return `${n} ${n === 1 ? t(singularKey) : t(pluralKey)}`;
+}
+
+const CATEGORY_LABELS = {
+  en: { Groceries: "Groceries", Dining: "Dining", Transport: "Transport", Shopping: "Shopping", Health: "Health", Entertainment: "Entertainment", Utilities: "Utilities", Home: "Home", Other: "Other" },
+  da: { Groceries: "Dagligvarer", Dining: "Restaurant", Transport: "Transport", Shopping: "Indkøb", Health: "Sundhed", Entertainment: "Underholdning", Utilities: "Forsyning", Home: "Hjem", Other: "Andet" },
+  de: { Groceries: "Lebensmittel", Dining: "Restaurant", Transport: "Transport", Shopping: "Einkaufen", Health: "Gesundheit", Entertainment: "Unterhaltung", Utilities: "Nebenkosten", Home: "Zuhause", Other: "Sonstiges" },
+};
+// IMPORTANT: this is ONLY for display. The underlying category identifiers stored on
+// items (item.category) and used for filtering/matching stay in English always —
+// translating those would break data consistency between languages.
+function catLabel(name) {
+  const dict = CATEGORY_LABELS[getLang()] || CATEGORY_LABELS.en;
+  return dict[name] || name;
+}
+
+function applyStaticTranslations() {
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const val = t(el.getAttribute("data-i18n"));
+    if (typeof val === "string") el.textContent = val;
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    const val = t(el.getAttribute("data-i18n-placeholder"));
+    if (typeof val === "string") el.placeholder = val;
+  });
 }
 
 /* --------------------------------- category guessing (fallback only) --------------------------------- */
@@ -306,12 +454,12 @@ async function callClaudeVision(base64) {
   });
 
   if (!response.ok) {
-    let msg = `Request failed (${response.status})`;
+    let msg = t("requestFailed")(response.status);
     try {
       const err = await response.json();
       msg = err?.error || msg;
     } catch {}
-    if (response.status === 429) throw new Error(msg || "Scan limit reached — ask the app owner to raise it.");
+    if (response.status === 429) throw new Error(msg || t("scanLimitReached"));
     throw new Error(msg);
   }
 
@@ -361,14 +509,14 @@ async function handleFile(file) {
   if (!file) return;
   showError(null);
   if (!getUserName()) {
-    showError("Enter your name in Settings (gear icon, top right) so the owner can see usage — takes 2 seconds.");
+    showError(t("enterNameError"));
     openSettings();
     return;
   }
-  showProgress(true, "Uploading photo…", 0.15);
+  showProgress(true, t("uploadingPhoto"), 0.15);
   try {
     const base64 = await fileToBase64(file);
-    showProgress(true, "Reading receipt with AI…", 0.55);
+    showProgress(true, t("readingWithAI"), 0.55);
     const ai = await callClaudeVision(base64);
     const store = (ai.store || "Unknown store").toString().slice(0, 60);
     const items = (ai.items || []).map((it) => ({
@@ -389,7 +537,7 @@ async function handleFile(file) {
       items,
       total,
     };
-    showProgress(true, "Saving photo…", 0.92);
+    showProgress(true, t("savingPhoto"), 0.92);
     const saved = await saveImage(receipt.id, `data:image/jpeg;base64,${base64}`);
     if (saved) receiptsWithPhotos.add(receipt.id);
     persist([receipt, ...receipts]);
@@ -398,7 +546,7 @@ async function handleFile(file) {
     renderAll();
   } catch (e) {
     console.error(e);
-    showError(e.message || "Couldn't read that receipt. Try again, or add it manually below.");
+    showError(e.message || t("couldntRead"));
   } finally {
     showProgress(false);
   }
@@ -507,7 +655,7 @@ function previousWindowSum(data) {
 function trendBadge(current, previous) {
   if (!previous || previous <= 0) return "";
   const pct = Math.round(((current - previous) / previous) * 100);
-  if (pct === 0) return `<span class="trend-flat">— flat</span>`;
+  if (pct === 0) return `<span class="trend-flat">${t("flat")}</span>`;
   const up = pct > 0;
   return `<span class="${up ? "trend-up" : "trend-down"}">${up ? "▲" : "▼"} ${Math.abs(pct)}%</span>`;
 }
@@ -528,7 +676,7 @@ function showProgress(on, label, progress) {
   document.getElementById("dz-idle").style.display = on ? "none" : "block";
   document.getElementById("dz-progress").style.display = on ? "flex" : "none";
   if (on) {
-    document.getElementById("progress-text").textContent = label || "Working…";
+    document.getElementById("progress-text").textContent = label || t("working");
     document.getElementById("progress-fill").style.width = `${Math.round((progress || 0) * 100)}%`;
   }
 }
@@ -536,9 +684,9 @@ function showProgress(on, label, progress) {
 function renderStats() {
   const s = quickStats();
   const cards = [
-    ["Today", s.day, s.prevDay],
-    ["This week", s.week, s.prevWeek],
-    ["This month", s.month, s.prevMonth],
+    [t("statToday"), s.day, s.prevDay],
+    [t("statWeek"), s.week, s.prevWeek],
+    [t("statMonth"), s.month, s.prevMonth],
   ];
   document.getElementById("stats").innerHTML = cards
     .map(
@@ -556,7 +704,7 @@ function renderChips() {
   const catChips = CATEGORIES.map((c) => {
     const active = currentFilter.type === "category" && currentFilter.value === c.name;
     const style = active ? `background:${c.color};border-color:${c.color};` : "";
-    return `<button class="chip ${active ? "active" : ""}" style="${style}" data-filter-cat="${esc(c.name)}">${esc(c.name)}</button>`;
+    return `<button class="chip ${active ? "active" : ""}" style="${style}" data-filter-cat="${esc(c.name)}">${esc(catLabel(c.name))}</button>`;
   }).join("");
   const groupChips = groups
     .map((g) => {
@@ -569,10 +717,10 @@ function renderChips() {
     })
     .join("");
   document.getElementById("chips").innerHTML =
-    `<button class="chip ${allActive ? "active" : ""}" style="${allActive ? "background:#2B2620;border-color:#2B2620;" : ""}" data-filter-all>All</button>` +
+    `<button class="chip ${allActive ? "active" : ""}" style="${allActive ? "background:#2B2620;border-color:#2B2620;" : ""}" data-filter-all>${t("allChip")}</button>` +
     catChips +
     groupChips +
-    `<button class="chip chip-add" data-add-group>+ Group</button>`;
+    `<button class="chip chip-add" data-add-group>${t("addGroupChip")}</button>`;
 }
 
 function renderChart() {
@@ -580,7 +728,7 @@ function renderChart() {
   const total = data.reduce((s, d) => s + d.value, 0);
   const prevTotal = previousWindowSum(data);
   document.getElementById("panel-total-label").textContent =
-    `${currentFilter.label} · last ${data.length} ${granularity === "day" ? "days" : granularity === "week" ? "weeks" : "months"}`;
+    `${currentFilter.label} · last ${data.length} ${granularity === "day" ? t("daysWord") : granularity === "week" ? t("weeksWord") : t("monthsWord")}`;
   document.getElementById("panel-total-value").innerHTML =
     `${total.toFixed(2)} kr. <span style="font-size:12px;margin-left:4px;">${trendBadge(total, prevTotal)}</span>`;
 
@@ -622,11 +770,11 @@ const TORN = tornPolygon();
 
 function renderReceipts() {
   const sorted = [...receipts].sort((a, b) => (a.date < b.date ? 1 : -1));
-  document.getElementById("count-label").textContent = `${sorted.length} receipt${sorted.length !== 1 ? "s" : ""}`;
+  document.getElementById("count-label").textContent = plural(sorted.length, "receiptWord", "receiptsWord");
   const list = document.getElementById("receipts-list");
 
   if (sorted.length === 0) {
-    list.innerHTML = `<div class="empty-state">Nothing filed yet. Scan your first receipt above.</div>`;
+    list.innerHTML = `<div class="empty-state">${t("nothingFiled")}</div>`;
     return;
   }
 
@@ -650,7 +798,7 @@ function renderReceipts() {
         : `<div class="r-items">${r.items
             .map((it) => {
               if (isEditing) {
-                const opts = CATEGORIES.map((c) => `<option value="${c.name}" ${it.category === c.name ? "selected" : ""}>${c.name}</option>`).join("");
+                const opts = CATEGORIES.map((c) => `<option value="${c.name}" ${it.category === c.name ? "selected" : ""}>${esc(catLabel(c.name))}</option>`).join("");
                 return `<div class="item-row">
                   <input class="f" data-act="set-item-name" data-rid="${r.id}" data-iid="${it.id}" value="${esc(it.product)}" style="flex:1;">
                   <input class="f" data-act="set-item-price" data-rid="${r.id}" data-iid="${it.id}" type="number" step="0.01" value="${it.price}" style="width:68px;">
@@ -661,12 +809,12 @@ function renderReceipts() {
               return `<div class="item-row">
                 <span class="dot" style="background:${catColor(it.category)}"></span>
                 <span class="item-name">${esc(it.product)}</span>
-                <span class="item-cat">${esc(it.category)}</span>
+                <span class="item-cat">${esc(catLabel(it.category))}</span>
                 <span class="item-price">${Number(it.price).toFixed(2)}</span>
               </div>`;
             })
             .join("")}
-            ${isEditing ? `<button class="btn-icon" data-act="add-item" data-rid="${r.id}" style="color:#3D5C43;align-self:flex-start;">+ add item</button>` : ""}
+            ${isEditing ? `<button class="btn-icon" data-act="add-item" data-rid="${r.id}" style="color:#3D5C43;align-self:flex-start;">${t("addItem")}</button>` : ""}
           </div>`;
 
       return `<div class="receipt-card fade-in" style="clip-path:${TORN};transform:rotate(${rot}deg);">
@@ -681,10 +829,10 @@ function renderReceipts() {
             </div>
           </div>
           <div class="r-actions">
-            <button class="btn-icon" data-act="toggle-open" data-id="${r.id}">${isOpen ? "&#9650;" : "&#9660;"} ${r.items.length} item${r.items.length !== 1 ? "s" : ""}</button>
-            <button class="btn-icon" data-act="toggle-edit" data-id="${r.id}">${isEditing ? "&#10003; Done" : "&#9998; Edit"}</button>
-            ${receiptsWithPhotos.has(r.id) ? `<button class="btn-icon" data-act="view-photo" data-id="${r.id}" title="View original photo">&#128247;</button>` : ""}
-            <button class="btn-icon" data-act="view-built" data-id="${r.id}" title="View built receipt">&#129534;</button>
+            <button class="btn-icon" data-act="toggle-open" data-id="${r.id}">${isOpen ? "&#9650;" : "&#9660;"} ${plural(r.items.length, "itemWord", "itemsWord")}</button>
+            <button class="btn-icon" data-act="toggle-edit" data-id="${r.id}">${isEditing ? t("doneLabel") : t("editLabel")}</button>
+            ${receiptsWithPhotos.has(r.id) ? `<button class="btn-icon" data-act="view-photo" data-id="${r.id}" title="${esc(t("viewOriginalPhoto"))}">&#128247;</button>` : ""}
+            <button class="btn-icon" data-act="view-built" data-id="${r.id}" title="${esc(t("viewBuiltReceipt"))}">&#129534;</button>
             <button class="btn-icon" data-act="delete" data-id="${r.id}" style="color:#A8321F;margin-left:auto;">&#128465;</button>
           </div>
           ${itemsHtml}
@@ -722,16 +870,16 @@ function renderMonthLookup() {
 
   document.getElementById("month-results").innerHTML = `
     <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:24px;margin-top:8px;">${total.toFixed(2)} kr.</div>
-    <div style="font-size:11px;color:var(--ink-light);margin-bottom:14px;">${esc(monthLabel)}${items.length ? ` · ${items.length} item${items.length !== 1 ? "s" : ""}` : ""}</div>
+    <div style="font-size:11px;color:var(--ink-light);margin-bottom:14px;">${esc(monthLabel)}${items.length ? ` · ${plural(items.length, "itemWord", "itemsWord")}` : ""}</div>
     ${
       rows.length === 0
-        ? `<div class="empty-state" style="padding:6px 0 4px;">No spending recorded that month.</div>`
+        ? `<div class="empty-state" style="padding:6px 0 4px;">${t("noSpendingRecorded")}</div>`
         : rows
             .map(
               ([cat, amt]) => `
         <div class="month-cat-row">
           <span class="dot" style="background:${catColor(cat)}"></span>
-          <span style="flex:1;">${esc(cat)}</span>
+          <span style="flex:1;">${esc(catLabel(cat))}</span>
           <span style="color:var(--ink-light);">${amt.toFixed(2)} kr.</span>
         </div>
         <div class="month-cat-bar-track"><div class="month-cat-bar-fill" style="width:${Math.round((amt / maxCat) * 100)}%;background:${catColor(cat)};"></div></div>`
@@ -756,12 +904,12 @@ function renderSearchOrList() {
   matches.sort((a, b) => (a.date < b.date ? 1 : -1));
   const totalSpent = matches.reduce((s, m) => s + (Number(m.price) || 0), 0);
 
-  document.getElementById("count-label").textContent = `${matches.length} match${matches.length !== 1 ? "es" : ""} for "${searchQuery}"`;
+  document.getElementById("count-label").textContent = `${plural(matches.length, "matchWord", "matchesWord")} ${t("forWord")} "${searchQuery}"`;
 
   resultsEl.innerHTML =
     matches.length === 0
-      ? `<div class="empty-state">No items match "${esc(searchQuery)}".</div>`
-      : `<div class="search-summary">Total on matches: <strong style="color:var(--ink);">${totalSpent.toFixed(2)} kr.</strong></div>` +
+      ? `<div class="empty-state">${t("noItemsMatchPrefix")} "${esc(searchQuery)}".</div>`
+      : `<div class="search-summary">${t("totalOnMatches")} <strong style="color:var(--ink);">${totalSpent.toFixed(2)} kr.</strong></div>` +
         matches
           .map(
             (m) => `
@@ -825,7 +973,7 @@ function renderReceiptCanvas(r) {
   itemBlocks.forEach((b) => { bodyLines += b.nameLines.length + (b.discountStr ? 1 : 0); });
 
   measure.font = FONT_SMALL;
-  const receiptNoLines = r.receiptNumber ? wrapCanvasText(measure, `Ref: ${r.receiptNumber}`, contentW) : [];
+  const receiptNoLines = r.receiptNumber ? wrapCanvasText(measure, `${t("refLabel")} ${r.receiptNumber}`, contentW) : [];
 
   const height = 46 + 24 + (r.location ? 18 : 0) + 26 + bodyLines * lineH + 24 + 26 + 22 + receiptNoLines.length * 16 + 34 + 20;
 
@@ -921,7 +1069,7 @@ function renderReceiptCanvas(r) {
   ctx.font = FONT_FOOT;
   ctx.fillStyle = MUTED;
   ctx.textAlign = "center";
-  ctx.fillText("Reconstructed from scanned receipt data", W / 2, y);
+  ctx.fillText(t("reconstructedFooter"), W / 2, y);
 
   return canvas;
 }
@@ -963,13 +1111,13 @@ function safeFilename(s) {
 /* ------------------------------------ photos & built-receipts tabs ------------------------------------- */
 async function renderPhotosGrid() {
   const grid = document.getElementById("photos-grid");
-  grid.innerHTML = `<div class="empty-state">Loading photos…</div>`;
+  grid.innerHTML = `<div class="empty-state">${t("readingReceipt")}</div>`;
   photoImagesCache = await getAllImages();
   const withPhotos = receipts.filter((r) => photoImagesCache[r.id]);
-  document.getElementById("count-label").textContent = `${withPhotos.length} photo${withPhotos.length !== 1 ? "s" : ""}`;
+  document.getElementById("count-label").textContent = plural(withPhotos.length, "photoWord", "photosWord");
 
   if (withPhotos.length === 0) {
-    grid.innerHTML = `<div class="empty-state">No saved photos yet — receipts you scan from now on will appear here.</div>`;
+    grid.innerHTML = `<div class="empty-state">${t("noSavedPhotos")}</div>`;
     return;
   }
   const sorted = [...withPhotos].sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -986,9 +1134,9 @@ async function renderPhotosGrid() {
 
 function renderBuiltGrid() {
   const grid = document.getElementById("built-grid");
-  document.getElementById("count-label").textContent = `${receipts.length} built receipt${receipts.length !== 1 ? "s" : ""}`;
+  document.getElementById("count-label").textContent = plural(receipts.length, "builtReceiptWord", "builtReceiptsWord");
   if (receipts.length === 0) {
-    grid.innerHTML = `<div class="empty-state">No receipts yet — scan one to see it here.</div>`;
+    grid.innerHTML = `<div class="empty-state">${t("noBuiltReceipts")}</div>`;
     return;
   }
   const sorted = [...receipts].sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -1005,7 +1153,7 @@ function renderBuiltGrid() {
 
 function openLightbox(id, dataUrl, store, date, mode) {
   document.getElementById("lightbox-img").src = dataUrl;
-  document.getElementById("lightbox-caption").textContent = [mode === "built" ? "Built receipt" : "Original photo", store, date].filter(Boolean).join(" · ");
+  document.getElementById("lightbox-caption").textContent = [mode === "built" ? t("builtReceiptLabel") : t("originalPhotoLabel"), store, date].filter(Boolean).join(" · ");
   document.getElementById("btn-lightbox-view").dataset.receiptId = id;
   document.getElementById("btn-lightbox-download").dataset.filename = `${safeFilename(store)}-${date}-${mode}.png`;
   document.getElementById("btn-lightbox-download").dataset.url = dataUrl;
@@ -1085,6 +1233,7 @@ function openSettings() {
   const s = loadSettings();
   document.getElementById("settings-name").value = s.name || "";
   document.getElementById("settings-model").value = s.model || DEFAULT_MODEL;
+  document.getElementById("settings-lang").value = s.lang || "en";
   document.getElementById("settings-modal").style.display = "flex";
 }
 function closeSettings() {
@@ -1096,13 +1245,16 @@ document.getElementById("btn-settings-close").addEventListener("click", closeSet
 document.getElementById("btn-settings-save").addEventListener("click", () => {
   const name = document.getElementById("settings-name").value.trim();
   const model = document.getElementById("settings-model").value;
+  const lang = document.getElementById("settings-lang").value;
   if (!name) {
-    alert("Enter a name — it's how the owner tells testers apart in the usage log.");
+    alert(t("enterNameAlert"));
     return;
   }
-  saveSettings({ name, model });
+  saveSettings({ name, model, lang });
   closeSettings();
   showError(null);
+  applyStaticTranslations();
+  renderAll();
 });
 
 /* ------------------------------------ events ------------------------------------- */
@@ -1138,7 +1290,7 @@ document.getElementById("chips").addEventListener("click", (e) => {
   if (removeBtn) {
     const id = removeBtn.dataset.removeGroup;
     const g = groups.find((g) => g.id === id);
-    if (g && confirm(`Delete the "${g.name}" group? (This won't delete any receipts.)`)) {
+    if (g && confirm(t("deleteGroupConfirm")(g.name))) {
       saveGroups(groups.filter((g) => g.id !== id));
       if (currentFilter.type === "group" && currentFilter.value === id) {
         currentFilter = { type: "all", value: null, label: "All" };
@@ -1166,7 +1318,7 @@ document.getElementById("chips").addEventListener("click", (e) => {
 
 function openGroupForm() {
   document.getElementById("group-cat-checks").innerHTML = CATEGORIES.map(
-    (c) => `<label class="group-cat-check"><input type="checkbox" value="${esc(c.name)}"> ${esc(c.name)}</label>`
+    (c) => `<label class="group-cat-check"><input type="checkbox" value="${esc(c.name)}"> ${esc(catLabel(c.name))}</label>`
   ).join("");
   document.getElementById("group-name").value = "";
   document.getElementById("group-form").style.display = "block";
@@ -1179,7 +1331,7 @@ document.getElementById("btn-group-save").addEventListener("click", () => {
   const name = document.getElementById("group-name").value.trim();
   const checked = Array.from(document.querySelectorAll("#group-cat-checks input:checked")).map((el) => el.value);
   if (!name || checked.length === 0) {
-    alert("Give the group a name and pick at least one category.");
+    alert(t("groupFormAlert"));
     return;
   }
   const g = { id: uid(), name: name.slice(0, 24), categories: checked };
@@ -1322,6 +1474,7 @@ window.addEventListener("resize", () => renderChart());
   }
 })();
 
+applyStaticTranslations();
 renderAll();
 
 // First run: ask for a name up front so scanning "just works" the first time someone
