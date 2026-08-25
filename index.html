@@ -135,7 +135,14 @@
   <div id="image-lightbox" class="modal-overlay" style="display:none;">
     <div id="lightbox-backdrop" class="modal-backdrop"></div>
     <div class="lightbox-card">
-      <img id="lightbox-img" src="" alt="Receipt photo" />
+      <div id="lightbox-viewport" class="lightbox-viewport">
+        <img id="lightbox-img" src="" alt="Receipt photo" />
+      </div>
+      <div class="lightbox-zoom-controls">
+        <button id="btn-zoom-out" class="zoom-btn" aria-label="Zoom out">&minus;</button>
+        <span id="zoom-level" class="zoom-level">100%</span>
+        <button id="btn-zoom-in" class="zoom-btn" aria-label="Zoom in">+</button>
+      </div>
       <div id="lightbox-caption" class="lightbox-caption"></div>
       <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;">
         <button id="btn-lightbox-close" class="btn btn-secondary" data-i18n="close">Close</button>

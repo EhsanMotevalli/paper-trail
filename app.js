@@ -423,16 +423,18 @@ const DEFAULT_CURRENCY = "kr.";
 /* --------------------------------- AI vision extraction --------------------------------- */
 function buildExtractionPrompt() {
   const catList = CATEGORIES.map((c) => c.name).join(", ");
-  return `You are reading a photo of a shop receipt, most likely Danish, sometimes English. Extract structured purchase data, reasoning carefully about which price belongs to which line. Be exhaustive — read every single purchased line on the receipt, including small print, faint thermal-print text, and lines near the edges of the photo. Missing an item is a real error, not an acceptable shortcut.
+  return `You are reading a photo of a shop receipt, most likely Danish, sometimes English. Extract structured purchase data, reasoning carefully about which price belongs to which line. Be exhaustive — read every single purchased line on the receipt, including small print, faint thermal-print text, and lines near the edges of the photo. Missing an item is a real error, not an acceptable shortcut. Never invent a product that isn't actually printed on the receipt.
 
 Rules:
 - Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the NET amount actually paid AFTER the discount (e.g. 19,95 with a 7,00 rabat -> price 12.95), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Do not list "RABAT" as its own item.
-- Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name and its price are split across lines, still pair them into one item.
+- Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name and its price are split across lines (including a name that wraps across 2 printed lines before its price appears), still pair all of it into ONE single item — never split one product into two separate item entries, and never let a "2 x N,00" quantity line become its own item separate from the product it belongs to.
+- Work top-to-bottom in strict printed order and keep each product name aligned with the price on the same printed row. If a row's price is hard to read, look at neighboring rows to sanity-check your alignment hasn't drifted — a common mistake is prices sliding down or up by one row partway through a long receipt.
 - The store name is the top line. The address (street + postal code/city) is usually the 1-2 lines right under it — put that in "location".
 - Find the receipt/transaction reference — usually printed near the bottom, often a till number, a long numeric string, a timestamp, or a line like "Bon nr" / "Kvittering nr" / "Transaction #". This is what a customer would need to quote for a return or complaint. Put the most complete version of it (with any till/store number alongside it) in "receiptNumber" as plain text, exactly as printed. Use "" if nothing like this is visible.
 - Find the payment method line, usually near the total — e.g. "Betalingskort", "VISA", "Dankort", "Mastercard", "MobilePay", "Kontant/Cash" — often followed by a partially masked card number the STORE has already printed masked for security, like "**** **** **** 1234" or "xxxx1234". Copy this masked payment line exactly as printed (never invent or unmask digits — only transcribe what's already partially hidden on the receipt) into "paymentMethod". Use "" if paid in cash or nothing is visible.
 - Ignore lines for TOTAL, subtotal, and VAT/MOMS — these are not purchased items and are not the receipt number or payment method.
-- The printed TOTAL is a helpful cross-check, but the sum of the items you extract is what the app actually displays — so make sure every priced line that's a genuine purchase is captured as an item; don't let real items go missing just because a subtotal or total is also visible.
+- Find the printed TOTAL and report it exactly in the "total" field — it's usually one bold, isolated line near the bottom, and is the single most important number to get right.
+- Before finalizing, add up the "price" of every item yourself and compare it to the printed TOTAL you found. If your items don't sum to the total, re-examine the receipt: you likely misread a price, merged a multi-line item incorrectly, duplicated a quantity line as its own item, or skipped something — fix it so your item list actually reconciles with the printed total as closely as possible.
 - Prices are plain numbers using a dot for decimals (convert Danish comma-decimals, e.g. "19,95" -> 19.95).
 - For every item, pick the closest category from exactly this list: ${catList}.
 
@@ -529,11 +531,27 @@ async function handleFile(file) {
     }));
     const itemsSum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
     const aiTotal = Math.round((Number(ai.total) || 0) * 100) / 100;
-    // Prefer the sum of the line items shown (and editable) right below the total — it's
-    // directly verifiable against the receipt. A single misread "total" digit has no such
-    // check and was the source of totals coming out too high. Only fall back to the
-    // model's reported total if no items were extracted at all.
-    const total = items.length > 0 ? itemsSum : aiTotal;
+    // The printed TOTAL is one clean, usually bold line — far less error-prone to read
+    // than 20-30 individual item lines. Trust it as ground truth. If the items don't add
+    // up to it, something in the item list is wrong (a misread price, a missed item, a
+    // duplicated line) — rather than hide that, add a visible adjustment line so the
+    // total is always correct AND the gap is obvious enough to go check against the photo.
+    let total;
+    if (aiTotal > 0) {
+      total = aiTotal;
+      const diff = Math.round((aiTotal - itemsSum) * 100) / 100;
+      if (Math.abs(diff) >= 0.05) {
+        items.push({
+          id: uid(),
+          product: "Unmatched — check items vs. photo",
+          price: diff,
+          discount: 0,
+          category: "Other",
+        });
+      }
+    } else {
+      total = itemsSum;
+    }
     const receipt = {
       id: uid(),
       store,
@@ -807,11 +825,11 @@ function renderReceipts() {
             .map((it) => {
               if (isEditing) {
                 const opts = CATEGORIES.map((c) => `<option value="${c.name}" ${it.category === c.name ? "selected" : ""}>${esc(catLabel(c.name))}</option>`).join("");
-                return `<div class="item-row">
-                  <input class="f" data-act="set-item-name" data-rid="${r.id}" data-iid="${it.id}" value="${esc(it.product)}" style="flex:1;">
-                  <input class="f" data-act="set-item-price" data-rid="${r.id}" data-iid="${it.id}" type="number" step="0.01" value="${it.price}" style="width:68px;">
-                  <select class="f" data-act="set-item-cat" data-rid="${r.id}" data-iid="${it.id}" style="width:112px;">${opts}</select>
-                  <button class="btn-icon" data-act="remove-item" data-rid="${r.id}" data-iid="${it.id}">&times;</button>
+                return `<div class="item-row item-row-edit">
+                  <input class="f item-name-input" data-act="set-item-name" data-rid="${r.id}" data-iid="${it.id}" value="${esc(it.product)}">
+                  <input class="f item-price-input" data-act="set-item-price" data-rid="${r.id}" data-iid="${it.id}" type="number" step="0.01" value="${it.price}">
+                  <select class="f item-cat-select" data-act="set-item-cat" data-rid="${r.id}" data-iid="${it.id}">${opts}</select>
+                  <button class="btn-icon item-del-btn" data-act="remove-item" data-rid="${r.id}" data-iid="${it.id}">&times;</button>
                 </div>`;
               }
               return `<div class="item-row">
@@ -956,15 +974,15 @@ function wrapCanvasText(ctx, text, maxWidth) {
 }
 
 function renderReceiptCanvas(r) {
-  const W = 420;
-  const padX = 26;
+  const W = 440;
+  const padX = 28;
   const contentW = W - padX * 2;
-  const lineH = 22;
-  const FONT_BODY = "14px 'Courier New', monospace";
-  const FONT_STORE = "bold 19px 'Courier New', monospace";
-  const FONT_SMALL = "12px 'Courier New', monospace";
-  const FONT_TOTAL = "bold 16px 'Courier New', monospace";
-  const FONT_FOOT = "italic 10px 'Courier New', monospace";
+  const lineH = 24;
+  const FONT_BODY = "15px 'Courier New', monospace";
+  const FONT_STORE = "bold 21px 'Courier New', monospace";
+  const FONT_SMALL = "13px 'Courier New', monospace";
+  const FONT_TOTAL = "bold 18px 'Courier New', monospace";
+  const FONT_FOOT = "italic 11px 'Courier New', monospace";
   const INK = "#2B2620", INK_LIGHT = "#736B5A", STAMP = "#A8321F", LINE = "#D4CBB8", PAPER = "#F5F1E8", MUTED = "#8A8378";
 
   // Measuring canvas for layout math before we know final height.
@@ -985,14 +1003,19 @@ function renderReceiptCanvas(r) {
   const paymentLines = r.paymentMethod ? wrapCanvasText(measure, r.paymentMethod, contentW) : [];
 
   const height = 46 + 24 + (r.location ? 18 : 0) + 26 + bodyLines * lineH + 24 + 26 + 22 + receiptNoLines.length * 16 + paymentLines.length * 16 + 34 + 20;
+  const logicalHeight = Math.max(height, 260);
 
+  // Render at 2x pixel density so the image stays crisp when zoomed in — long receipts
+  // with 20-30 items were coming out visibly blurry/tiny once scaled to fit the lightbox.
+  const SCALE = 2;
   const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = Math.max(height, 260);
+  canvas.width = W * SCALE;
+  canvas.height = logicalHeight * SCALE;
   const ctx = canvas.getContext("2d");
+  ctx.scale(SCALE, SCALE);
 
   ctx.fillStyle = PAPER;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, W, logicalHeight);
 
   let y = 40;
   ctx.textAlign = "center";
@@ -1170,6 +1193,14 @@ function renderBuiltGrid() {
     .join("");
 }
 
+let lightboxZoom = 100;
+const ZOOM_MIN = 50, ZOOM_MAX = 300, ZOOM_STEP = 25;
+function setLightboxZoom(pct) {
+  lightboxZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pct));
+  document.getElementById("lightbox-img").style.width = `${lightboxZoom}%`;
+  document.getElementById("zoom-level").textContent = `${lightboxZoom}%`;
+}
+
 function openLightbox(id, dataUrl, store, date, mode) {
   document.getElementById("lightbox-img").src = dataUrl;
   document.getElementById("lightbox-caption").textContent = [mode === "built" ? t("builtReceiptLabel") : t("originalPhotoLabel"), store, date].filter(Boolean).join(" · ");
@@ -1179,12 +1210,21 @@ function openLightbox(id, dataUrl, store, date, mode) {
   document.getElementById("btn-lightbox-share").dataset.filename = `${safeFilename(store)}-${date}-${mode}.png`;
   document.getElementById("btn-lightbox-share").dataset.url = dataUrl;
   document.getElementById("btn-lightbox-share").dataset.title = `${store} receipt`;
+  document.getElementById("lightbox-viewport").scrollTop = 0;
+  document.getElementById("lightbox-viewport").scrollLeft = 0;
+  setLightboxZoom(100);
   document.getElementById("image-lightbox").style.display = "flex";
 }
 function closeLightbox() {
   document.getElementById("image-lightbox").style.display = "none";
   document.getElementById("lightbox-img").src = "";
 }
+document.getElementById("btn-zoom-in").addEventListener("click", () => setLightboxZoom(lightboxZoom + ZOOM_STEP));
+document.getElementById("btn-zoom-out").addEventListener("click", () => setLightboxZoom(lightboxZoom - ZOOM_STEP));
+// Tap the image itself as a quick shortcut: zoomed out -> jump to a readable 200%, zoomed in -> back to fit.
+document.getElementById("lightbox-img").addEventListener("click", () => {
+  setLightboxZoom(lightboxZoom > 100 ? 100 : 200);
+});
 
 document.getElementById("photos-grid").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-open-photo]");
@@ -1296,6 +1336,7 @@ document.getElementById("lang-popover").addEventListener("click", (e) => {
   if (!btn) return;
   saveSettings({ ...loadSettings(), lang: btn.dataset.lang });
   toggleLangPopover(false);
+  builtReceiptCache.clear(); // re-render built receipts fresh so any localized text isn't stale
   applyStaticTranslations();
   renderAll();
 });

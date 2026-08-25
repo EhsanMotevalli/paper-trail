@@ -129,7 +129,12 @@ body {
 .photo-thumb-label span { opacity: 0.75; }
 
 .lightbox-card { position: relative; background: var(--paper); border-radius: 14px; padding: 14px; width: 92%; max-width: 480px; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-.lightbox-card img { width: 100%; max-height: 62vh; object-fit: contain; border-radius: 8px; background: #000; }
+.lightbox-viewport { width: 100%; max-height: 58vh; overflow: auto; border-radius: 8px; background: #000; touch-action: pan-x pan-y pinch-zoom; }
+.lightbox-viewport img { display: block; width: 100%; height: auto; object-fit: contain; transform-origin: top left; transition: width .15s ease; }
+.lightbox-zoom-controls { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; }
+.zoom-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--white); color: var(--ink); font-size: 18px; font-family: 'IBM Plex Mono', monospace; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; }
+.zoom-btn:active { transform: scale(0.95); }
+.zoom-level { font-size: 12px; color: var(--ink-light); min-width: 42px; text-align: center; }
 .lightbox-caption { font-size: 12px; color: var(--ink-light); margin: 10px 2px 0; }
 #image-lightbox.modal-overlay { align-items: center; }
 
@@ -144,6 +149,11 @@ body {
 .r-actions { display: flex; gap: 14px; margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; align-items: center; }
 .r-items { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .item-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.item-row-edit { flex-wrap: wrap; row-gap: 6px; }
+.item-row-edit .item-name-input { flex: 1 1 100%; }
+.item-row-edit .item-price-input { flex: 1 1 80px; min-width: 70px; }
+.item-row-edit .item-cat-select { flex: 2 1 110px; min-width: 100px; }
+.item-row-edit .item-del-btn { flex: 0 0 auto; }
 .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .item-name { flex: 1; }
 .item-cat { color: var(--ink-light); font-size: 10.5px; }
