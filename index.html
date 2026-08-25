@@ -26,9 +26,21 @@
         <div class="logo">Paper Trail</div>
         <div class="tagline" data-i18n="tagline">every receipt, accounted for</div>
       </div>
-      <button id="btn-settings" class="settings-btn" aria-label="Settings" title="Settings">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#736B5A" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      </button>
+      <div class="header-actions">
+        <div class="lang-wrap">
+          <button id="btn-lang" class="settings-btn" aria-label="Language" title="Language">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#736B5A" stroke-width="1.7"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </button>
+          <div id="lang-popover" class="lang-popover" style="display:none;">
+            <button class="lang-option" data-lang="en">English</button>
+            <button class="lang-option" data-lang="da">Dansk</button>
+            <button class="lang-option" data-lang="de">Deutsch</button>
+          </div>
+        </div>
+        <button id="btn-settings" class="settings-btn" aria-label="Settings" title="Settings">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#736B5A" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
     </div>
 
     <div id="settings-modal" class="modal-overlay" style="display:none;">
@@ -42,12 +54,6 @@
         <select id="settings-model" class="f">
           <option value="claude-haiku-4-5-20251001" data-i18n="modelHaiku">Claude Haiku 4.5 — fast &amp; cheap (recommended)</option>
           <option value="claude-sonnet-5" data-i18n="modelSonnet">Claude Sonnet 5 — most accurate</option>
-        </select>
-        <label class="modal-label" style="margin-top:14px;" data-i18n="language">Language</label>
-        <select id="settings-lang" class="f">
-          <option value="en">English</option>
-          <option value="da">Dansk (Danish)</option>
-          <option value="de">Deutsch (German)</option>
         </select>
         <div class="modal-actions">
           <button id="btn-settings-close" class="btn btn-secondary" data-i18n="cancel">Cancel</button>

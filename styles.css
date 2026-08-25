@@ -37,6 +37,13 @@ body {
 .settings-btn { background: var(--white); border: 1px solid var(--line); border-radius: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
 .settings-btn:active { transform: scale(0.95); }
 
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.lang-wrap { position: relative; }
+.lang-popover { position: absolute; top: 42px; right: 0; background: var(--white); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 16px rgba(43,38,32,0.15); padding: 4px; z-index: 50; min-width: 130px; }
+.lang-option { display: block; width: 100%; text-align: left; background: none; border: none; padding: 9px 12px; border-radius: 6px; font-size: 13px; font-family: 'IBM Plex Mono', monospace; color: var(--ink); cursor: pointer; }
+.lang-option:hover, .lang-option:active { background: var(--paper-dark); }
+.lang-option.active { color: var(--forest); font-weight: 600; }
+
 .modal-overlay { position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-end; justify-content: center; }
 @media (min-width: 480px) { .modal-overlay { align-items: center; } }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(43,38,32,0.45); }
