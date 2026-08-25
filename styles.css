@@ -25,6 +25,11 @@ body {
 
 .wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 60px; }
 
+.install-banner { display: flex; align-items: center; gap: 10px; background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; font-size: 12.5px; line-height: 1.5; }
+.install-banner .ios-share-icon { flex-shrink: 0; }
+.install-btn-inline { background: var(--forest); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-family: 'IBM Plex Mono', monospace; cursor: pointer; white-space: nowrap; }
+.install-dismiss { background: none; border: none; color: var(--ink-light); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; flex-shrink: 0; }
+
 .header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
 .logo { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 26px; letter-spacing: -0.01em; }
 .tagline { color: var(--ink-light); font-size: 12px; margin-top: 2px; }

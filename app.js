@@ -220,7 +220,10 @@ function shiftPeriod(key, g, delta) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 
-/* --------------------------------- settings (API key) --------------------------------- */
+/* --------------------------------- settings (name + model) --------------------------------- */
+// No API key lives in the browser anymore — scans go through the app's own /api/scan
+// proxy, which holds the real key server-side. All we keep locally is a display name
+// (so the owner can see per-person usage) and a model preference.
 const SETTINGS_KEY = "paperTrailSettings";
 const DEFAULT_MODEL = "claude-sonnet-5";
 function loadSettings() {
@@ -237,8 +240,8 @@ function saveSettings(s) {
     console.error("save settings failed", e);
   }
 }
-function getApiKey() {
-  return (loadSettings().apiKey || "").trim();
+function getUserName() {
+  return (loadSettings().name || "").trim();
 }
 function getModel() {
   return loadSettings().model || DEFAULT_MODEL;
@@ -289,55 +292,32 @@ Return ONLY strict JSON, no markdown fences, no commentary, in exactly this shap
 }
 
 async function callClaudeVision(base64) {
-  const apiKey = getApiKey();
   const model = getModel();
-  // Structured extraction doesn't benefit from deliberation, and on Sonnet 5, adaptive
-  // thinking is ON by default and shares the SAME token budget as the actual JSON
-  // answer — with a modest max_tokens that reliably starved the answer and truncated
-  // the JSON mid-way. Disabling thinking (Sonnet-5-only field) fixes that and is
-  // faster/cheaper too. Also give plenty of headroom for long, many-item receipts.
-  const body = {
-    model,
-    max_tokens: 4096,
-    messages: [
-      {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-          { type: "text", text: buildExtractionPrompt() },
-        ],
-      },
-    ],
-  };
-  if (model === "claude-sonnet-5") {
-    body.thinking = { type: "disabled" };
-  }
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch("/api/scan", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: getUserName(),
+      model,
+      image: base64,
+      prompt: buildExtractionPrompt(),
+    }),
   });
 
   if (!response.ok) {
     let msg = `Request failed (${response.status})`;
     try {
       const err = await response.json();
-      msg = err?.error?.message || msg;
+      msg = err?.error || msg;
     } catch {}
-    if (response.status === 401) throw new Error("That API key was rejected. Check it in Settings.");
-    if (response.status === 429) throw new Error("Rate limited by Anthropic — wait a moment and try again.");
+    if (response.status === 429) throw new Error(msg || "Scan limit reached — ask the app owner to raise it.");
     throw new Error(msg);
   }
 
   const data = await response.json();
   if (data.stop_reason === "max_tokens") {
-    throw new Error("The receipt was too long for the reply to finish — try again (this should be fixed now, but a very long receipt can still hit the limit).");
+    throw new Error("The receipt was too long for the reply to finish — try again.");
   }
   const text = (data.content || []).map((b) => b.text || "").join("").trim();
   const clean = text.replace(/```json|```/g, "").trim();
@@ -380,8 +360,8 @@ function fileToBase64(file, maxDim = 2000) {
 async function handleFile(file) {
   if (!file) return;
   showError(null);
-  if (!getApiKey()) {
-    showError("Add your Anthropic API key in Settings (gear icon, top right) before scanning.");
+  if (!getUserName()) {
+    showError("Enter your name in Settings (gear icon, top right) so the owner can see usage — takes 2 seconds.");
     openSettings();
     return;
   }
@@ -1103,7 +1083,7 @@ function applyViewVisibility() {
 /* ------------------------------------ settings modal ------------------------------------- */
 function openSettings() {
   const s = loadSettings();
-  document.getElementById("settings-key").value = s.apiKey || "";
+  document.getElementById("settings-name").value = s.name || "";
   document.getElementById("settings-model").value = s.model || DEFAULT_MODEL;
   document.getElementById("settings-modal").style.display = "flex";
 }
@@ -1114,9 +1094,13 @@ document.getElementById("btn-settings").addEventListener("click", openSettings);
 document.getElementById("settings-backdrop").addEventListener("click", closeSettings);
 document.getElementById("btn-settings-close").addEventListener("click", closeSettings);
 document.getElementById("btn-settings-save").addEventListener("click", () => {
-  const apiKey = document.getElementById("settings-key").value.trim();
+  const name = document.getElementById("settings-name").value.trim();
   const model = document.getElementById("settings-model").value;
-  saveSettings({ apiKey, model });
+  if (!name) {
+    alert("Enter a name — it's how the owner tells testers apart in the usage log.");
+    return;
+  }
+  saveSettings({ name, model });
   closeSettings();
   showError(null);
 });
@@ -1280,7 +1264,71 @@ document.getElementById("receipts-list").addEventListener("change", (e) => {
 
 window.addEventListener("resize", () => renderChart());
 
+/* ------------------------------------ install prompt ------------------------------------- */
+(function () {
+  const DISMISS_KEY = "paperTrailInstallDismissed";
+  const banner = document.getElementById("install-banner");
+  const content = document.getElementById("install-banner-content");
+  const dismissBtn = document.getElementById("btn-install-dismiss");
+
+  function isStandalone() {
+    return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  }
+  function isIOS() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+  function showBanner(html) {
+    content.innerHTML = html;
+    banner.style.display = "flex";
+  }
+  dismissBtn.addEventListener("click", () => {
+    localStorage.setItem(DISMISS_KEY, "1");
+    banner.style.display = "none";
+  });
+
+  if (isStandalone() || localStorage.getItem(DISMISS_KEY) === "1") {
+    // already installed, or the user dismissed this before — stay quiet
+  } else if (isIOS()) {
+    // Safari gives web pages no way to trigger the install prompt — the closest thing
+    // to "automatic" here is spelling out the exact two taps needed.
+    showBanner(`
+      <svg class="ios-share-icon" width="18" height="22" viewBox="0 0 18 22" fill="none" stroke="#3D5C43" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 1v12M9 1l-4 4M9 1l4 4"/>
+        <path d="M2 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/>
+      </svg>
+      <span>Install this app: tap <strong>Share</strong>, then <strong>"Add to Home Screen"</strong>.</span>
+    `);
+  } else {
+    // Chrome/Edge (Android + desktop) fire this when the app is installable —
+    // capture it and offer a real one-tap install instead of the browser's own banner.
+    let deferredPrompt = null;
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      showBanner(`<span>📲 Install Paper Trail for quick, full-screen access.</span><button id="btn-do-install" class="install-btn-inline">Install</button>`);
+      document.getElementById("btn-do-install").addEventListener("click", async () => {
+        banner.style.display = "none";
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          await deferredPrompt.userChoice;
+          deferredPrompt = null;
+        }
+      });
+    });
+    window.addEventListener("appinstalled", () => {
+      localStorage.setItem(DISMISS_KEY, "1");
+      banner.style.display = "none";
+    });
+  }
+})();
+
 renderAll();
+
+// First run: ask for a name up front so scanning "just works" the first time someone
+// taps the button, instead of them hitting an error first.
+if (!getUserName()) {
+  openSettings();
+}
 
 // Preload which receipts have a saved photo (just the keys, not the images) so the
 // 📷 badge on each card is accurate without having to open the Photos tab first.

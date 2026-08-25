@@ -1,4 +1,4 @@
-const CACHE = "paper-trail-v7";
+const CACHE = "paper-trail-v9";
 const SHELL = [
   "./",
   "./index.html",
@@ -29,6 +29,13 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
+  // Never cache the /api/* proxy — it's dynamic, mostly POST, and per-person. Always
+  // go straight to the network (the browser can't reliably cache POST requests anyway).
+  if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) {
+    event.respondWith(fetch(req));
+    return;
+  }
+
   // App shell: cache-first
   if (url.origin === self.location.origin) {
     event.respondWith(
@@ -44,7 +51,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Third-party (Tesseract.js core/worker/lang data, fonts): stale-while-revalidate
+  // Third-party (fonts, etc): stale-while-revalidate
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(req);

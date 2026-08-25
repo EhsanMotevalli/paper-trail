@@ -1,0 +1,9 @@
+{
+  "name": "paper-trail",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "redis": "^4.6.0"
+  }
+}

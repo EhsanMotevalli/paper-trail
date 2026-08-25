@@ -16,6 +16,11 @@
 </head>
 <body>
   <div class="wrap">
+    <div id="install-banner" class="install-banner" style="display:none;">
+      <div id="install-banner-content"></div>
+      <button id="btn-install-dismiss" class="install-dismiss" aria-label="Dismiss">&times;</button>
+    </div>
+
     <div class="header">
       <div>
         <div class="logo">Paper Trail</div>
@@ -30,18 +35,16 @@
       <div id="settings-backdrop" class="modal-backdrop"></div>
       <div class="modal-card">
         <div class="modal-title">Settings</div>
-        <label class="modal-label">Anthropic API key</label>
-        <input id="settings-key" class="f" type="password" placeholder="sk-ant-..." autocomplete="off" />
+        <label class="modal-label">Your name</label>
+        <input id="settings-name" class="f" type="text" placeholder="e.g. Sara" autocomplete="off" maxlength="40" />
         <div class="modal-hint">
-          Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
-          Stored only on this device (localStorage) and sent directly to Anthropic when you scan — never through any other server.
+          Just so the app owner can tell testers apart in the usage log — nothing else is shared. No API key needed; scans are billed to the owner's account.
         </div>
         <label class="modal-label" style="margin-top:14px;">Model</label>
         <select id="settings-model" class="f">
           <option value="claude-sonnet-5">Claude Sonnet 5 — most accurate (recommended)</option>
           <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 — faster & cheaper</option>
         </select>
-        <div class="modal-hint">Each scan costs a small fraction of a cent — billed to your own Anthropic account.</div>
         <div class="modal-actions">
           <button id="btn-settings-close" class="btn btn-secondary">Cancel</button>
           <button id="btn-settings-save" class="btn btn-primary">Save</button>
