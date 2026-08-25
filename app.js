@@ -782,14 +782,19 @@ function renderChart() {
   document.getElementById("chart").innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}">${bars}${labels}</svg>`;
 }
 
-function tornPolygon(teeth = 22, depth = 6) {
-  const pts = ["0% 0%", "100% 0%", "100% 100%"];
+// The zigzag depth must stay a small FIXED pixel strip, not a percentage of the card's
+// height — a percentage looked fine on short (2-3 item) receipts but on a long receipt
+// (20-30 items, a much taller card) it grew to 60-80+ px and clipped straight through
+// the last several item rows and the "add item" button. calc() lets us mix % (for the
+// zigzag's horizontal teeth) with a fixed px depth.
+function tornPolygon(teeth = 22, depthPx = 9) {
+  const pts = ["0 0", "100% 0", "100% 100%"];
   for (let i = 0; i <= teeth; i++) {
     const x = 100 - (i / teeth) * 100;
-    const y = i % 2 === 0 ? 100 : 100 - depth;
-    pts.push(`${x.toFixed(2)}% ${y}%`);
+    const y = i % 2 === 0 ? "100%" : `calc(100% - ${depthPx}px)`;
+    pts.push(`${x.toFixed(2)}% ${y}`);
   }
-  pts.push("0% 100%");
+  pts.push("0 100%");
   return `polygon(${pts.join(",")})`;
 }
 const TORN = tornPolygon();
