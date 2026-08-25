@@ -423,20 +423,21 @@ const DEFAULT_CURRENCY = "kr.";
 /* --------------------------------- AI vision extraction --------------------------------- */
 function buildExtractionPrompt() {
   const catList = CATEGORIES.map((c) => c.name).join(", ");
-  return `You are reading a photo of a shop receipt, most likely Danish, sometimes English. Extract structured purchase data, reasoning carefully about which price belongs to which line.
+  return `You are reading a photo of a shop receipt, most likely Danish, sometimes English. Extract structured purchase data, reasoning carefully about which price belongs to which line. Be exhaustive — read every single purchased line on the receipt, including small print, faint thermal-print text, and lines near the edges of the photo. Missing an item is a real error, not an acceptable shortcut.
 
 Rules:
 - Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the NET amount actually paid AFTER the discount (e.g. 19,95 with a 7,00 rabat -> price 12.95), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Do not list "RABAT" as its own item.
 - Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name and its price are split across lines, still pair them into one item.
 - The store name is the top line. The address (street + postal code/city) is usually the 1-2 lines right under it — put that in "location".
 - Find the receipt/transaction reference — usually printed near the bottom, often a till number, a long numeric string, a timestamp, or a line like "Bon nr" / "Kvittering nr" / "Transaction #". This is what a customer would need to quote for a return or complaint. Put the most complete version of it (with any till/store number alongside it) in "receiptNumber" as plain text, exactly as printed. Use "" if nothing like this is visible.
-- Ignore lines for TOTAL, subtotal, VAT/MOMS, payment method (BETALINGSKORT/kort/kontant/MobilePay), and staff names — these are not purchased items and are not the receipt number.
-- The printed TOTAL is ground truth for the receipt's total.
+- Find the payment method line, usually near the total — e.g. "Betalingskort", "VISA", "Dankort", "Mastercard", "MobilePay", "Kontant/Cash" — often followed by a partially masked card number the STORE has already printed masked for security, like "**** **** **** 1234" or "xxxx1234". Copy this masked payment line exactly as printed (never invent or unmask digits — only transcribe what's already partially hidden on the receipt) into "paymentMethod". Use "" if paid in cash or nothing is visible.
+- Ignore lines for TOTAL, subtotal, and VAT/MOMS — these are not purchased items and are not the receipt number or payment method.
+- The printed TOTAL is a helpful cross-check, but the sum of the items you extract is what the app actually displays — so make sure every priced line that's a genuine purchase is captured as an item; don't let real items go missing just because a subtotal or total is also visible.
 - Prices are plain numbers using a dot for decimals (convert Danish comma-decimals, e.g. "19,95" -> 19.95).
 - For every item, pick the closest category from exactly this list: ${catList}.
 
 Return ONLY strict JSON, no markdown fences, no commentary, in exactly this shape:
-{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","receiptNumber":"string, exactly as printed, empty if none","items":[{"product":"string","price":number,"discount":number,"category":"one of the list above"}],"total":number}`;
+{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","receiptNumber":"string, exactly as printed, empty if none","paymentMethod":"string, exactly as printed (already-masked card ok), empty if none","items":[{"product":"string","price":number,"discount":number,"category":"one of the list above"}],"total":number}`;
 }
 
 async function callClaudeVision(base64) {
@@ -526,7 +527,13 @@ async function handleFile(file) {
       discount: Number(it.discount) || 0, // gross line price = price + discount; used only for the built-receipt reconstruction
       category: CATEGORIES.some((c) => c.name === it.category) ? it.category : guessCategory(it.product, store),
     }));
-    const total = Number(ai.total) || Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
+    const itemsSum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
+    const aiTotal = Math.round((Number(ai.total) || 0) * 100) / 100;
+    // Prefer the sum of the line items shown (and editable) right below the total — it's
+    // directly verifiable against the receipt. A single misread "total" digit has no such
+    // check and was the source of totals coming out too high. Only fall back to the
+    // model's reported total if no items were extracted at all.
+    const total = items.length > 0 ? itemsSum : aiTotal;
     const receipt = {
       id: uid(),
       store,
@@ -534,6 +541,7 @@ async function handleFile(file) {
       date: /^\d{4}-\d{2}-\d{2}$/.test(ai.date) ? ai.date : todayISO(),
       currency: ai.currency || DEFAULT_CURRENCY,
       receiptNumber: (ai.receiptNumber || "").toString().slice(0, 60),
+      paymentMethod: (ai.paymentMethod || "").toString().slice(0, 60),
       items,
       total,
     };
@@ -974,8 +982,9 @@ function renderReceiptCanvas(r) {
 
   measure.font = FONT_SMALL;
   const receiptNoLines = r.receiptNumber ? wrapCanvasText(measure, `${t("refLabel")} ${r.receiptNumber}`, contentW) : [];
+  const paymentLines = r.paymentMethod ? wrapCanvasText(measure, r.paymentMethod, contentW) : [];
 
-  const height = 46 + 24 + (r.location ? 18 : 0) + 26 + bodyLines * lineH + 24 + 26 + 22 + receiptNoLines.length * 16 + 34 + 20;
+  const height = 46 + 24 + (r.location ? 18 : 0) + 26 + bodyLines * lineH + 24 + 26 + 22 + receiptNoLines.length * 16 + paymentLines.length * 16 + 34 + 20;
 
   const canvas = document.createElement("canvas");
   canvas.width = W;
@@ -1052,6 +1061,16 @@ function renderReceiptCanvas(r) {
   ctx.textAlign = "left";
   ctx.fillText(r.date || "", padX, y);
   y += 20;
+
+  if (paymentLines.length) {
+    ctx.font = FONT_SMALL;
+    ctx.fillStyle = INK_LIGHT;
+    ctx.textAlign = "left";
+    paymentLines.forEach((line) => {
+      ctx.fillText(line, padX, y);
+      y += 16;
+    });
+  }
 
   if (receiptNoLines.length) {
     ctx.font = FONT_SMALL;
@@ -1233,7 +1252,6 @@ function openSettings() {
   const s = loadSettings();
   document.getElementById("settings-name").value = s.name || "";
   document.getElementById("settings-model").value = s.model || DEFAULT_MODEL;
-  document.getElementById("settings-lang").value = s.lang || "en";
   document.getElementById("settings-modal").style.display = "flex";
 }
 function closeSettings() {
@@ -1245,16 +1263,45 @@ document.getElementById("btn-settings-close").addEventListener("click", closeSet
 document.getElementById("btn-settings-save").addEventListener("click", () => {
   const name = document.getElementById("settings-name").value.trim();
   const model = document.getElementById("settings-model").value;
-  const lang = document.getElementById("settings-lang").value;
   if (!name) {
     alert(t("enterNameAlert"));
     return;
   }
-  saveSettings({ name, model, lang });
+  saveSettings({ ...loadSettings(), name, model });
   closeSettings();
   showError(null);
   applyStaticTranslations();
   renderAll();
+});
+
+/* ------------------------------------ language popover ------------------------------------- */
+function renderLangPopover() {
+  const current = getLang();
+  document.querySelectorAll("#lang-popover .lang-option").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.lang === current);
+  });
+}
+function toggleLangPopover(force) {
+  const pop = document.getElementById("lang-popover");
+  const show = force !== undefined ? force : pop.style.display === "none";
+  pop.style.display = show ? "block" : "none";
+  if (show) renderLangPopover();
+}
+document.getElementById("btn-lang").addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleLangPopover();
+});
+document.getElementById("lang-popover").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-lang]");
+  if (!btn) return;
+  saveSettings({ ...loadSettings(), lang: btn.dataset.lang });
+  toggleLangPopover(false);
+  applyStaticTranslations();
+  renderAll();
+});
+document.addEventListener("click", (e) => {
+  const wrap = document.querySelector(".lang-wrap");
+  if (wrap && !wrap.contains(e.target)) toggleLangPopover(false);
 });
 
 /* ------------------------------------ events ------------------------------------- */
