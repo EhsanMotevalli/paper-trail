@@ -256,7 +256,7 @@ const TRANSLATIONS = {
     tagline: "every receipt, accounted for",
     settingsTitle: "Settings", yourName: "Your name", namePlaceholder: "e.g. Sara",
     nameHint: "Just so the app owner can tell testers apart in the usage log — nothing else is shared. No API key needed; scans are billed to the owner's account.",
-    model: "Model", modelHaiku: "Claude Haiku 4.5 — fast & cheap (recommended)", modelSonnet: "Claude Sonnet 5 — most accurate",
+    model: "Model", modelHaiku: "Claude Haiku 4.5 — fast & cheap (recommended)", modelSonnet: "Claude Sonnet 5 — most accurate", modelGemini: "Gemini 2.5 Flash — Google, fast & cheap",
     language: "Language", cancel: "Cancel", save: "Save",
     dzHint: "Drop a receipt image, or —", takePhoto: "Take photo", upload: "Upload", addManually: "Add manually",
     readingReceipt: "Reading your receipt…", groupNamePlaceholder: "Group name (e.g. Home)", createGroup: "Create group",
@@ -279,6 +279,7 @@ const TRANSLATIONS = {
     enterNameAlert: "Enter a name — it's how the owner tells testers apart in the usage log.",
     couldntRead: "Couldn't read that receipt. Try again, or add it manually below.",
     scanLimitReached: "Scan limit reached — ask the app owner to raise it.",
+    retakeSuggestion: "This receipt didn't read cleanly — try retaking the photo flatter and better lit for a more accurate result.",
     refLabel: "Ref:", reconstructedFooter: "Reconstructed from scanned receipt data",
     uploadingPhoto: "Uploading photo…", readingWithAI: "Reading receipt with AI…", savingPhoto: "Saving photo…", working: "Working…",
     requestFailed: (s) => `Request failed (${s})`,
@@ -292,7 +293,7 @@ const TRANSLATIONS = {
     tagline: "hver kvittering, gjort op",
     settingsTitle: "Indstillinger", yourName: "Dit navn", namePlaceholder: "f.eks. Sara",
     nameHint: "Så ejeren kan kende testerne fra hinanden i forbrugsloggen — intet andet deles. Ingen API-nøgle nødvendig; scanninger betales af ejeren.",
-    model: "Model", modelHaiku: "Claude Haiku 4.5 — hurtig & billig (anbefalet)", modelSonnet: "Claude Sonnet 5 — mest præcis",
+    model: "Model", modelHaiku: "Claude Haiku 4.5 — hurtig & billig (anbefalet)", modelSonnet: "Claude Sonnet 5 — mest præcis", modelGemini: "Gemini 2.5 Flash — Google, hurtig & billig",
     language: "Sprog", cancel: "Annullér", save: "Gem",
     dzHint: "Træk et kvitteringsbillede herind, eller —", takePhoto: "Tag foto", upload: "Upload", addManually: "Tilføj manuelt",
     readingReceipt: "Læser din kvittering…", groupNamePlaceholder: "Gruppenavn (f.eks. Hjem)", createGroup: "Opret gruppe",
@@ -315,6 +316,7 @@ const TRANSLATIONS = {
     enterNameAlert: "Indtast et navn — det er sådan ejeren kender testerne fra hinanden i forbrugsloggen.",
     couldntRead: "Kunne ikke læse den kvittering. Prøv igen, eller tilføj den manuelt nedenfor.",
     scanLimitReached: "Scanningsgrænse nået — bed ejeren om at hæve den.",
+    retakeSuggestion: "Denne kvittering blev ikke læst korrekt — prøv at tage billedet igen, fladere og bedre belyst, for et mere præcist resultat.",
     refLabel: "Ref:", reconstructedFooter: "Genskabt fra scannede kvitteringsdata",
     uploadingPhoto: "Uploader foto…", readingWithAI: "Læser kvittering med AI…", savingPhoto: "Gemmer foto…", working: "Arbejder…",
     requestFailed: (s) => `Forespørgsel fejlede (${s})`,
@@ -328,7 +330,7 @@ const TRANSLATIONS = {
     tagline: "jeder Beleg, erfasst",
     settingsTitle: "Einstellungen", yourName: "Dein Name", namePlaceholder: "z. B. Sara",
     nameHint: "Nur damit der Besitzer die Tester im Nutzungsprotokoll unterscheiden kann — sonst wird nichts geteilt. Kein API-Schlüssel nötig; Scans werden dem Besitzer berechnet.",
-    model: "Modell", modelHaiku: "Claude Haiku 4.5 — schnell & günstig (empfohlen)", modelSonnet: "Claude Sonnet 5 — am genauesten",
+    model: "Modell", modelHaiku: "Claude Haiku 4.5 — schnell & günstig (empfohlen)", modelSonnet: "Claude Sonnet 5 — am genauesten", modelGemini: "Gemini 2.5 Flash — Google, schnell & günstig",
     language: "Sprache", cancel: "Abbrechen", save: "Speichern",
     dzHint: "Beleg-Foto hierher ziehen, oder —", takePhoto: "Foto aufnehmen", upload: "Hochladen", addManually: "Manuell hinzufügen",
     readingReceipt: "Beleg wird gelesen…", groupNamePlaceholder: "Gruppenname (z. B. Zuhause)", createGroup: "Gruppe erstellen",
@@ -351,6 +353,7 @@ const TRANSLATIONS = {
     enterNameAlert: "Gib einen Namen ein — so kann der Besitzer Tester im Nutzungsprotokoll unterscheiden.",
     couldntRead: "Der Beleg konnte nicht gelesen werden. Versuch es erneut oder füge ihn unten manuell hinzu.",
     scanLimitReached: "Scan-Limit erreicht — bitte den Besitzer, es zu erhöhen.",
+    retakeSuggestion: "Dieser Beleg wurde nicht sauber gelesen — versuche das Foto flacher und besser beleuchtet erneut aufzunehmen für ein genaueres Ergebnis.",
     refLabel: "Ref.:", reconstructedFooter: "Aus gescannten Belegdaten rekonstruiert",
     uploadingPhoto: "Foto wird hochgeladen…", readingWithAI: "Beleg wird mit KI gelesen…", savingPhoto: "Foto wird gespeichert…", working: "Wird verarbeitet…",
     requestFailed: (s) => `Anfrage fehlgeschlagen (${s})`,
@@ -430,7 +433,8 @@ Today's date is ${todayStr} — use this only to resolve ambiguous 2-digit years
 
 Rules:
 - Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the NET amount actually paid AFTER the discount (e.g. 19,95 with a 7,00 rabat -> price 12.95), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Do not list "RABAT" as its own item.
-- Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name and its price are split across lines (including a name that wraps across 2 printed lines before its price appears), still pair all of it into ONE single item — never split one product into two separate item entries, and never let a "2 x N,00" quantity line become its own item separate from the product it belongs to.
+- Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name has NO price on its own line, its price comes from the next line (a quantity line, or a plain amount) — pair those into ONE item. But this only applies when the name line truly has no price of its own: if a line already ends in its own price (e.g. "KOKO BANAN M CHOKO   35,00"), that is already a complete, standalone item — do NOT merge it with whatever comes after. A following line with no price of its own (e.g. "ÆGGEBÆGRE") followed by a quantity+total line is its own SEPARATE item, not a continuation of the item before it. Rule of thumb: every line that already has a price ends an item right there; only a price-less line reaches forward to grab the next line's price.
+- Before merging any two lines into one item, sanity-check the MEANING as well as the layout: do the words plausibly describe the same single product, or two different things? "KOKO BANAN M CHOKO" (a chocolate-covered banana snack) and "ÆGGEBÆGRE" (egg cups) are unrelated products that happen to sit on adjacent lines — merging them because of layout alone is wrong. A real multi-line product name reads as one continuous phrase (e.g. "ØKO ARLA LETMÆLK" continuing to "1L" or "SPAR RIBBENSTEG" continuing to "FRILAND" both clearly describe one item). If adjacent lines don't plausibly name the same product, treat them as separate items even if the layout alone looked mergeable.
 - Work top-to-bottom in strict printed order and keep each product name aligned with the price on the same printed row. If a row's price is hard to read, look at neighboring rows to sanity-check your alignment hasn't drifted — a common mistake is prices sliding down or up by one row partway through a long receipt.
 - The store name is the top line. The address (street + postal code/city) is usually the 1-2 lines right under it — put that in "location".
 - The purchase DATE is easy to misread because it's often crammed into one small footer line alongside unrelated numbers — e.g. a Danish receipt line like "25 1 927 17 08 26 16:04" mixes a till number ("25"), a cashier/register number ("1"), a receipt/bon number ("927"), THEN the actual date as DD MM YY ("17 08 26" = 17 August 2026), and finally the time ("16:04"). Only the DD MM YY portion is the date — do not mistake the till/cashier/bon numbers for part of it. If a clearer, separately-printed date exists elsewhere on the receipt, prefer that instead.
@@ -482,6 +486,7 @@ async function callClaudeVision(base64) {
   if (start === -1 || end === -1) throw new Error("The model didn't return readable data — try again.");
   const parsed = JSON.parse(clean.slice(start, end + 1));
   if (!Array.isArray(parsed.items)) throw new Error("Malformed response from the model.");
+  parsed._needsRetake = !!data._meta?.needsRetake;
   return parsed;
 }
 
@@ -572,6 +577,7 @@ async function handleFile(file) {
       receiptNumber: (ai.receiptNumber || "").toString().slice(0, 60),
       paymentMethod: (ai.paymentMethod || "").toString().slice(0, 60),
       barcodeNumber: (ai.barcodeNumber || "").toString().replace(/[^\w-]/g, "").slice(0, 40),
+      needsRetake: !!ai._needsRetake,
       items,
       total,
     };
@@ -878,6 +884,7 @@ function renderReceipts() {
             <button class="btn-icon" data-act="view-built" data-id="${r.id}" title="${esc(t("viewBuiltReceipt"))}">&#129534;</button>
             <button class="btn-icon" data-act="delete" data-id="${r.id}" style="color:#A8321F;margin-left:auto;">&#128465;</button>
           </div>
+          ${r.needsRetake ? `<div class="retake-notice">&#9888; ${esc(t("retakeSuggestion"))}</div>` : ""}
           ${itemsHtml}
         </div>
       </div>`;
