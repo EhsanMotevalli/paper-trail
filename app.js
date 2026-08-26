@@ -280,6 +280,8 @@ const TRANSLATIONS = {
     couldntRead: "Couldn't read that receipt. Try again, or add it manually below.",
     scanLimitReached: "Scan limit reached — ask the app owner to raise it.",
     retakeSuggestion: "This receipt didn't read cleanly — try retaking the photo flatter and better lit for a more accurate result.",
+    unmatchNoFlags: (amt) => `${amt} kr. doesn't add up — try retaking the photo flatter and better lit for a more accurate result.`,
+    unmatchWithFlags: (amt, n) => `${amt} kr. doesn't add up — ${n} flagged item${n !== 1 ? "s" : ""} below may be why. Fix ${n !== 1 ? "them" : "it"}, or retake the photo for a cleaner read.`,
     lowConfidenceFlag: "The AI wasn't fully sure about this line — worth checking against the photo.",
     refLabel: "Ref:", reconstructedFooter: "Reconstructed from scanned receipt data",
     uploadingPhoto: "Uploading photo…", readingWithAI: "Reading receipt with AI…", savingPhoto: "Saving photo…", working: "Working…",
@@ -318,6 +320,8 @@ const TRANSLATIONS = {
     couldntRead: "Kunne ikke læse den kvittering. Prøv igen, eller tilføj den manuelt nedenfor.",
     scanLimitReached: "Scanningsgrænse nået — bed ejeren om at hæve den.",
     retakeSuggestion: "Denne kvittering blev ikke læst korrekt — prøv at tage billedet igen, fladere og bedre belyst, for et mere præcist resultat.",
+    unmatchNoFlags: (amt) => `${amt} kr. går ikke op — prøv at tage billedet igen, fladere og bedre belyst, for et mere præcist resultat.`,
+    unmatchWithFlags: (amt, n) => `${amt} kr. går ikke op — ${n} markeret${n !== 1 ? "de" : ""} vare${n !== 1 ? "r" : ""} nedenfor kan være årsagen. Ret ${n !== 1 ? "dem" : "den"}, eller tag billedet igen.`,
     lowConfidenceFlag: "AI'en var ikke helt sikker på denne linje — værd at tjekke mod fotoet.",
     refLabel: "Ref:", reconstructedFooter: "Genskabt fra scannede kvitteringsdata",
     uploadingPhoto: "Uploader foto…", readingWithAI: "Læser kvittering med AI…", savingPhoto: "Gemmer foto…", working: "Arbejder…",
@@ -356,6 +360,8 @@ const TRANSLATIONS = {
     couldntRead: "Der Beleg konnte nicht gelesen werden. Versuch es erneut oder füge ihn unten manuell hinzu.",
     scanLimitReached: "Scan-Limit erreicht — bitte den Besitzer, es zu erhöhen.",
     retakeSuggestion: "Dieser Beleg wurde nicht sauber gelesen — versuche das Foto flacher und besser beleuchtet erneut aufzunehmen für ein genaueres Ergebnis.",
+    unmatchNoFlags: (amt) => `${amt} kr. gehen nicht auf — versuche das Foto flacher und besser beleuchtet erneut aufzunehmen.`,
+    unmatchWithFlags: (amt, n) => `${amt} kr. gehen nicht auf — ${n} markierte${n !== 1 ? "" : "r"} Artikel unten könnte${n !== 1 ? "n" : ""} der Grund sein. Korrigiere ${n !== 1 ? "sie" : "ihn"} oder mach das Foto erneut.`,
     lowConfidenceFlag: "Die KI war sich bei dieser Zeile nicht ganz sicher — lohnt sich, mit dem Foto zu vergleichen.",
     refLabel: "Ref.:", reconstructedFooter: "Aus gescannten Belegdaten rekonstruiert",
     uploadingPhoto: "Foto wird hochgeladen…", readingWithAI: "Beleg wird mit KI gelesen…", savingPhoto: "Foto wird gespeichert…", working: "Wird verarbeitet…",
@@ -444,7 +450,7 @@ Rules:
 - Find the receipt/transaction reference — usually the same busy footer line described above, or a "Bon nr" / "Kvittering nr" / "Transaction #" line. This is what a customer would need to quote for a return or complaint. Put the most complete version of it (till/cashier/bon numbers together) in "receiptNumber" as plain text, exactly as printed — this field CAN include those numbers, they just don't belong in "date". Use "" if nothing like this is visible.
 - Find the payment method line, usually near the total — e.g. "Betalingskort", "VISA", "Dankort", "Mastercard", "MobilePay", "Kontant/Cash" — often followed by a partially masked card number the STORE has already printed masked for security, like "**** **** **** 1234" or "xxxx1234". Copy this masked payment line exactly as printed (never invent or unmask digits — only transcribe what's already partially hidden on the receipt) into "paymentMethod". Use "" if paid in cash or nothing is visible.
 - If there's a barcode near the bottom of the receipt, it usually has its own human-readable number printed directly below or beside the bars (the same digits the barcode itself encodes). Transcribe that digit/character string exactly into "barcodeNumber". Use "" if there's no barcode or no readable number under it — never guess or invent digits you can't actually read.
-- Ignore lines for TOTAL, subtotal, and VAT/MOMS — these are not purchased items and are not the receipt number or payment method.
+- Ignore lines for TOTAL, subtotal, and VAT/MOMS — these are not purchased items and are not the receipt number or payment method. Everything printed AFTER the TOTAL line is footer material: payment confirmation, a VAT/MOMS breakdown (e.g. "HERAF 25% MOMS", "MOMS TOTAL"), a running discount total across the whole receipt (e.g. "RABAT I ALT"), or a store signoff message. None of that footer block is ever a purchased item or a per-item discount, no matter what words appear in it — a line like "RABAT I ALT" contains the word "RABAT" but is a receipt-wide summary, not a discount belonging to any specific item, and must be ignored completely. Only a "RABAT" (or garbled variant) line that appears BETWEEN two items, directly under the specific item it discounts, and BEFORE the TOTAL line, is a real per-item discount.
 - Focus entirely on the receipt's printed text and numbers. Photos often include background clutter around the receipt — a table, rug, hand, shadows, folds — ignore all of that completely; it is never part of the data you're extracting.
 - Find the printed TOTAL and report it exactly in the "total" field — it's usually one bold, isolated line near the bottom, and is the single most important number to get right.
 - Before finalizing, add up the "price" of every item yourself and compare it to the printed TOTAL you found. Use this only as a way to CATCH mistakes — if the two don't match, re-examine the receipt for a genuinely misread price, an incorrectly merged multi-line item, a duplicated quantity line, or a skipped item, and correct whichever of those you actually find. Do NOT adjust an item's price, invent a phantom item, or change the total just to force the numbers to agree artificially — report your honest best reading of each value even if a real, unexplained gap remains between the items and the total. A truthful mismatch is far more useful than a fake match.
@@ -556,15 +562,37 @@ function looksLikeMisreadDiscountWord(product) {
 function foldMisreadDiscountLines(items) {
   const cleaned = [];
   for (const it of items) {
-    if (looksLikeMisreadDiscountWord(it.product) && cleaned.length > 0 && it.price > 0) {
+    // No longer requiring price > 0 here: if the model half-recognized the line as
+    // discount-related and reported it with price 0 (rather than fully folding it
+    // in), it was slipping through this check entirely and staying stranded as its
+    // own zero-priced item. A name match alone is enough to drop the stray line —
+    // folding a 0 changes nothing numerically, but still correctly removes the row.
+    if (looksLikeMisreadDiscountWord(it.product) && cleaned.length > 0) {
       const prev = cleaned[cleaned.length - 1];
-      prev.discount = Math.round(((prev.discount || 0) + it.price) * 100) / 100;
-      prev.price = Math.max(0, Math.round((prev.price - it.price) * 100) / 100);
+      if (it.price > 0) {
+        prev.discount = Math.round(((prev.discount || 0) + it.price) * 100) / 100;
+        prev.price = Math.max(0, Math.round((prev.price - it.price) * 100) / 100);
+      }
       continue;
     }
     cleaned.push(it);
   }
   return cleaned;
+}
+
+// This is the exact literal text handleFile gives the synthetic reconciliation line —
+// used as a stable marker to detect "does this receipt currently have an unresolved
+// gap" from the CURRENT item list (post any manual edits), not a frozen scan-time flag.
+// Not translated: it's stored data from scan time, unaffected by later UI language changes.
+const UNMATCHED_MARKER = "Unmatched — check items vs. photo";
+// Returns the current unmatched amount (>0) if that marker line is still present with a
+// nonzero price, or null if there's nothing to flag — recomputed fresh every render, so
+// editing the flagged item (or deleting/zeroing the marker line) makes the warning
+// disappear naturally, without needing any separate "mark as fixed" step.
+function currentUnmatchedAmount(r) {
+  const marker = (r.items || []).find((it) => it.product === UNMATCHED_MARKER);
+  const amt = marker ? Math.abs(Number(marker.price) || 0) : 0;
+  return amt > 0.01 ? amt : null;
 }
 
 async function handleFile(file) {
@@ -894,6 +922,21 @@ function renderReceipts() {
       const isEditing = editingId === r.id;
       const rot = ((idx % 3) - 1) * 0.35;
 
+      // Recomputed fresh on every render from the CURRENT item list — not a frozen
+      // scan-time flag — so fixing the flagged item (or clearing the unmatched line)
+      // makes this warning disappear on its own, no separate "mark as fixed" step.
+      const unmatchedAmt = currentUnmatchedAmount(r);
+      const flaggedInReceipt = r.items.filter((it) => it.lowConfidence).length;
+      // Per-item confidence flags are only shown while there's an actual unmatch to
+      // explain — if the numbers already add up, a flagged-but-harmless line isn't
+      // worth bothering the user about.
+      const showConfidenceFlags = unmatchedAmt !== null;
+      const warningMsg = unmatchedAmt === null
+        ? null
+        : flaggedInReceipt > 0
+          ? t("unmatchWithFlags")(unmatchedAmt.toFixed(2), flaggedInReceipt)
+          : t("unmatchNoFlags")(unmatchedAmt.toFixed(2));
+
       const metaHtml = isEditing
         ? `<input class="f" type="date" data-act="set-date" data-id="${r.id}" value="${esc(r.date)}" style="width:130px;">
            <input class="f" placeholder="location" data-act="set-location" data-id="${r.id}" value="${esc(r.location)}" style="width:140px;">`
@@ -907,7 +950,7 @@ function renderReceipts() {
         ? ""
         : `<div class="r-items">${r.items
             .map((it) => {
-              const flagIcon = it.lowConfidence
+              const flagIcon = it.lowConfidence && showConfidenceFlags
                 ? `<span class="low-conf-flag" title="${esc(t("lowConfidenceFlag"))}">&#9888;</span>`
                 : "";
               if (isEditing) {
@@ -950,7 +993,7 @@ function renderReceipts() {
             <button class="btn-icon" data-act="view-built" data-id="${r.id}" title="${esc(t("viewBuiltReceipt"))}">&#129534;</button>
             <button class="btn-icon" data-act="delete" data-id="${r.id}" style="color:#A8321F;margin-left:auto;">&#128465;</button>
           </div>
-          ${r.needsRetake ? `<div class="retake-notice">&#9888; ${esc(t("retakeSuggestion"))}</div>` : ""}
+          ${warningMsg ? `<div class="retake-notice">&#9888; ${esc(warningMsg)}</div>` : ""}
           ${itemsHtml}
         </div>
       </div>`;
