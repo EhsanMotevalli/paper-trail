@@ -280,6 +280,7 @@ const TRANSLATIONS = {
     couldntRead: "Couldn't read that receipt. Try again, or add it manually below.",
     scanLimitReached: "Scan limit reached — ask the app owner to raise it.",
     retakeSuggestion: "This receipt didn't read cleanly — try retaking the photo flatter and better lit for a more accurate result.",
+    lowConfidenceFlag: "The AI wasn't fully sure about this line — worth checking against the photo.",
     refLabel: "Ref:", reconstructedFooter: "Reconstructed from scanned receipt data",
     uploadingPhoto: "Uploading photo…", readingWithAI: "Reading receipt with AI…", savingPhoto: "Saving photo…", working: "Working…",
     requestFailed: (s) => `Request failed (${s})`,
@@ -317,6 +318,7 @@ const TRANSLATIONS = {
     couldntRead: "Kunne ikke læse den kvittering. Prøv igen, eller tilføj den manuelt nedenfor.",
     scanLimitReached: "Scanningsgrænse nået — bed ejeren om at hæve den.",
     retakeSuggestion: "Denne kvittering blev ikke læst korrekt — prøv at tage billedet igen, fladere og bedre belyst, for et mere præcist resultat.",
+    lowConfidenceFlag: "AI'en var ikke helt sikker på denne linje — værd at tjekke mod fotoet.",
     refLabel: "Ref:", reconstructedFooter: "Genskabt fra scannede kvitteringsdata",
     uploadingPhoto: "Uploader foto…", readingWithAI: "Læser kvittering med AI…", savingPhoto: "Gemmer foto…", working: "Arbejder…",
     requestFailed: (s) => `Forespørgsel fejlede (${s})`,
@@ -354,6 +356,7 @@ const TRANSLATIONS = {
     couldntRead: "Der Beleg konnte nicht gelesen werden. Versuch es erneut oder füge ihn unten manuell hinzu.",
     scanLimitReached: "Scan-Limit erreicht — bitte den Besitzer, es zu erhöhen.",
     retakeSuggestion: "Dieser Beleg wurde nicht sauber gelesen — versuche das Foto flacher und besser beleuchtet erneut aufzunehmen für ein genaueres Ergebnis.",
+    lowConfidenceFlag: "Die KI war sich bei dieser Zeile nicht ganz sicher — lohnt sich, mit dem Foto zu vergleichen.",
     refLabel: "Ref.:", reconstructedFooter: "Aus gescannten Belegdaten rekonstruiert",
     uploadingPhoto: "Foto wird hochgeladen…", readingWithAI: "Beleg wird mit KI gelesen…", savingPhoto: "Foto wird gespeichert…", working: "Wird verarbeitet…",
     requestFailed: (s) => `Anfrage fehlgeschlagen (${s})`,
@@ -447,9 +450,10 @@ Rules:
 - Before finalizing, add up the "price" of every item yourself and compare it to the printed TOTAL you found. Use this only as a way to CATCH mistakes — if the two don't match, re-examine the receipt for a genuinely misread price, an incorrectly merged multi-line item, a duplicated quantity line, or a skipped item, and correct whichever of those you actually find. Do NOT adjust an item's price, invent a phantom item, or change the total just to force the numbers to agree artificially — report your honest best reading of each value even if a real, unexplained gap remains between the items and the total. A truthful mismatch is far more useful than a fake match.
 - Prices are plain numbers using a dot for decimals (convert Danish comma-decimals, e.g. "19,95" -> 19.95).
 - For every item, pick the closest category from exactly this list: ${catList}.
+- For every item, also report "lowConfidence": true if you're genuinely not fully sure about that line's product name or price — faint or blurry print, an ambiguous digit, a partially obscured number, guessed row alignment, or a name you had to infer rather than clearly read. Otherwise report false. Be honest here rather than defaulting everything to false — this is what lets a human reviewer know exactly which lines are worth double-checking against the photo, so flag anything with real uncertainty, but don't flag lines you're actually confident about just to be cautious.
 
 Return ONLY strict JSON, no markdown fences, no commentary, in exactly this shape:
-{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","receiptNumber":"string, exactly as printed, empty if none","paymentMethod":"string, exactly as printed (already-masked card ok), empty if none","barcodeNumber":"digits/characters printed under the barcode, empty if none","items":[{"product":"string","price":number,"discount":number,"category":"one of the list above"}],"total":number}`;
+{"store":"string","location":"string (address, empty if not visible)","date":"YYYY-MM-DD","currency":"kr. or other currency symbol/code","receiptNumber":"string, exactly as printed, empty if none","paymentMethod":"string, exactly as printed (already-masked card ok), empty if none","barcodeNumber":"digits/characters printed under the barcode, empty if none","items":[{"product":"string","price":number,"discount":number,"category":"one of the list above","lowConfidence":boolean}],"total":number}`;
 }
 
 async function callClaudeVision(base64) {
@@ -553,6 +557,7 @@ async function handleFile(file) {
         price: net, // net = what was actually paid; this is what all spend tracking uses
         discount, // kept separately so the built receipt can reconstruct: gross line + RABAT line
         category: CATEGORIES.some((c) => c.name === it.category) ? it.category : guessCategory(it.product, store),
+        lowConfidence: !!it.lowConfidence,
       };
     });
     const itemsSum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
@@ -862,17 +867,22 @@ function renderReceipts() {
         ? ""
         : `<div class="r-items">${r.items
             .map((it) => {
+              const flagIcon = it.lowConfidence
+                ? `<span class="low-conf-flag" title="${esc(t("lowConfidenceFlag"))}">&#9888;</span>`
+                : "";
               if (isEditing) {
                 const opts = CATEGORIES.map((c) => `<option value="${c.name}" ${it.category === c.name ? "selected" : ""}>${esc(catLabel(c.name))}</option>`).join("");
-                return `<div class="item-row item-row-edit">
+                return `<div class="item-row item-row-edit ${it.lowConfidence ? "item-row-flagged" : ""}">
+                  ${flagIcon}
                   <input class="f item-name-input" data-act="set-item-name" data-rid="${r.id}" data-iid="${it.id}" value="${esc(it.product)}">
                   <input class="f item-price-input" data-act="set-item-price" data-rid="${r.id}" data-iid="${it.id}" type="number" step="0.01" value="${it.price}">
                   <select class="f item-cat-select" data-act="set-item-cat" data-rid="${r.id}" data-iid="${it.id}">${opts}</select>
                   <button class="btn-icon item-del-btn" data-act="remove-item" data-rid="${r.id}" data-iid="${it.id}">&times;</button>
                 </div>`;
               }
-              return `<div class="item-row">
+              return `<div class="item-row ${it.lowConfidence ? "item-row-flagged" : ""}">
                 <span class="dot" style="background:${catColor(it.category)}"></span>
+                ${flagIcon}
                 <span class="item-name">${esc(it.product)}</span>
                 <span class="item-cat">${esc(catLabel(it.category))}</span>
                 <span class="item-price">${Number(it.price).toFixed(2)}</span>
@@ -1577,8 +1587,8 @@ document.getElementById("receipts-list").addEventListener("change", (e) => {
   if (act === "set-store") updateReceipt(el.dataset.id, { store: el.value });
   else if (act === "set-date") updateReceipt(el.dataset.id, { date: el.value });
   else if (act === "set-location") updateReceipt(el.dataset.id, { location: el.value });
-  else if (act === "set-item-name") updateItem(el.dataset.rid, el.dataset.iid, { product: el.value });
-  else if (act === "set-item-price") updateItem(el.dataset.rid, el.dataset.iid, { price: Number(el.value) });
+  else if (act === "set-item-name") updateItem(el.dataset.rid, el.dataset.iid, { product: el.value, lowConfidence: false });
+  else if (act === "set-item-price") updateItem(el.dataset.rid, el.dataset.iid, { price: Number(el.value), lowConfidence: false });
   else if (act === "set-item-cat") updateItem(el.dataset.rid, el.dataset.iid, { category: el.value });
 });
 
