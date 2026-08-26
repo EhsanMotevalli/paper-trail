@@ -101,10 +101,6 @@ async function callAnthropic(useModel, image, prompt, temperature = 0) {
   const body = {
     model: useModel,
     max_tokens: 4096,
-    // temperature 0 by default: for a "read this receipt exactly" task, we want the
-    // most reproducible answer on the first try. The retry path can pass a higher
-    // temperature — see callModel below for why.
-    temperature,
     messages: [
       {
         role: "user",
@@ -115,7 +111,17 @@ async function callAnthropic(useModel, image, prompt, temperature = 0) {
       },
     ],
   };
-  if (useModel === "claude-sonnet-5") body.thinking = { type: "disabled" };
+  if (useModel === "claude-sonnet-5") {
+    // Confirmed live: Sonnet 5 rejects `temperature` outright when a `thinking` config
+    // is present at all (even explicitly disabled) — "`temperature` is deprecated for
+    // this model." So for this model we skip temperature entirely rather than error.
+    body.thinking = { type: "disabled" };
+  } else {
+    // temperature 0 by default on models that do support it: for a "read this receipt
+    // exactly" task, we want the most reproducible answer on the first try. The retry
+    // path can pass a higher temperature — see callModel below for why.
+    body.temperature = temperature;
+  }
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",

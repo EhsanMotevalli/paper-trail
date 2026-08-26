@@ -435,7 +435,7 @@ function buildExtractionPrompt() {
 Today's date is ${todayStr} — use this only to resolve ambiguous 2-digit years on the receipt (e.g. "26" almost certainly means 2026, not some other century), never as a fallback value to fill in when you can't find a date.
 
 Rules:
-- Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the GROSS amount exactly as printed on that item's own line (e.g. 19,95 in that example — do NOT subtract the discount yourself), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Just transcribe both numbers as printed — the app calculates the net amount itself. Do not list "RABAT" as its own item.
+- Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the GROSS amount exactly as printed on that item's own line (e.g. 19,95 in that example — do NOT subtract the discount yourself), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Just transcribe both numbers as printed — the app calculates the net amount itself. Do not list "RABAT" as its own item. The most reliable signal for a discount line is the trailing "-" printed directly after the amount (e.g. "7,00-") — treat ANY short line ending in that trailing minus sign as a discount belonging to the item directly above it, even if the word next to it is hard to read or doesn't look like "RABAT" at all (worn thermal print can garble it into almost anything, e.g. "PARAT", "RASAT" — don't rely on recognizing the exact word). The trailing minus sign on the number is what actually identifies a discount line, more than the word does.
 - Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name has NO price on its own line, its price comes from the next line (a quantity line, or a plain amount) — pair those into ONE item. But this only applies when the name line truly has no price of its own: if a line already ends in its own price (e.g. "KOKO BANAN M CHOKO   35,00"), that is already a complete, standalone item — do NOT merge it with whatever comes after. A following line with no price of its own (e.g. "ÆGGEBÆGRE") followed by a quantity+total line is its own SEPARATE item, not a continuation of the item before it. Rule of thumb: every line that already has a price ends an item right there; only a price-less line reaches forward to grab the next line's price.
 - Before merging any two lines into one item, sanity-check the MEANING as well as the layout: do the words plausibly describe the same single product, or two different things? "KOKO BANAN M CHOKO" (a chocolate-covered banana snack) and "ÆGGEBÆGRE" (egg cups) are unrelated products that happen to sit on adjacent lines — merging them because of layout alone is wrong. A real multi-line product name reads as one continuous phrase (e.g. "ØKO ARLA LETMÆLK" continuing to "1L" or "SPAR RIBBENSTEG" continuing to "FRILAND" both clearly describe one item). If adjacent lines don't plausibly name the same product, treat them as separate items even if the layout alone looked mergeable.
 - Work top-to-bottom in strict printed order and keep each product name aligned with the price on the same printed row. If a row's price is hard to read, look at neighboring rows to sanity-check your alignment hasn't drifted — a common mistake is prices sliding down or up by one row partway through a long receipt.
@@ -528,6 +528,45 @@ function fileToBase64(file, maxDim = 2000) {
   });
 }
 
+// Small Levenshtein distance, used to fuzzy-match near-miss OCR reads of "RABAT"
+// against garbled variants (e.g. "PARAT", "RASAT") — a known failure mode on faint
+// thermal print, especially with the cheaper model.
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+const DISCOUNT_WORD_VARIANTS = ["RABAT", "DISCOUNT"];
+function looksLikeMisreadDiscountWord(product) {
+  const norm = (product || "").toUpperCase().replace(/[^A-ZÆØÅ]/g, "");
+  if (!norm || norm.length > 8) return false; // real product names are usually longer than this
+  return DISCOUNT_WORD_VARIANTS.some((w) => levenshtein(norm, w) <= 2);
+}
+// Safety net: if the model still mis-transcribed "RABAT" as something else and reported
+// it as its own standalone item (instead of recognizing it as a discount line), catch
+// that pattern here in plain code and fold it into the item directly above it as a
+// discount — rather than silently counting a garbled word as a real purchase.
+function foldMisreadDiscountLines(items) {
+  const cleaned = [];
+  for (const it of items) {
+    if (looksLikeMisreadDiscountWord(it.product) && cleaned.length > 0 && it.price > 0) {
+      const prev = cleaned[cleaned.length - 1];
+      prev.discount = Math.round(((prev.discount || 0) + it.price) * 100) / 100;
+      prev.price = Math.max(0, Math.round((prev.price - it.price) * 100) / 100);
+      continue;
+    }
+    cleaned.push(it);
+  }
+  return cleaned;
+}
+
 async function handleFile(file) {
   if (!file) return;
   showError(null);
@@ -542,7 +581,7 @@ async function handleFile(file) {
     showProgress(true, t("readingWithAI"), 0.55);
     const ai = await callClaudeVision(base64);
     const store = (ai.store || "Unknown store").toString().slice(0, 60);
-    const items = (ai.items || []).map((it) => {
+    const rawItems = (ai.items || []).map((it) => {
       // The model reports the GROSS printed line price and the discount separately —
       // it does NOT do the subtraction itself. Models are unreliable at "report X minus
       // Y" arithmetic mid-extraction (it was quietly reporting gross as if it were net,
@@ -560,6 +599,7 @@ async function handleFile(file) {
         lowConfidence: !!it.lowConfidence,
       };
     });
+    const items = foldMisreadDiscountLines(rawItems);
     const itemsSum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
     const aiTotal = Math.round((Number(ai.total) || 0) * 100) / 100;
     // The printed TOTAL is one clean, usually bold line — far less error-prone to read
