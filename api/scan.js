@@ -31,15 +31,16 @@ function getClient() {
 
 const SCAN_CAP = 50;
 // $ per million tokens. Update if pricing changes.
-// NOTE on gemini-2.5-flash: third-party pricing trackers disagreed at the time this was
-// written ($0.15/$1.25 vs $0.30/$2.50) — using the more consistently-reported figure
-// below, but treat it as approximate until confirmed against your actual Google AI
-// Studio billing. Also: Google has scheduled gemini-2.5-flash for retirement around
-// October 2026 in favor of newer Gemini 3.x models — this will need swapping out then.
+// gemini-2.5-flash was retired by Google before this app even shipped (confirmed live,
+// "no longer available to new users") — swapped to gemini-3.6-flash, Google's own
+// suggested replacement. Rate below ($1.50/$7.50) is the standard tier reported by
+// multiple independent trackers as of when this was written; spot-check against your
+// actual Google AI Studio billing. Google marks 3.6-flash pricing as effective through
+// Dec 31, 2026, doubling to $1.50/$1M -> a different rate on Jan 1, 2027 — revisit then.
 const MODEL_PRICES = {
   "claude-sonnet-5": { input: 2, output: 10 },
   "claude-haiku-4-5-20251001": { input: 1, output: 5 },
-  "gemini-2.5-flash": { input: 0.3, output: 2.5 },
+  "gemini-3.6-flash": { input: 1.5, output: 7.5 },
 };
 const ALLOWED_MODELS = Object.keys(MODEL_PRICES);
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
@@ -100,10 +101,6 @@ async function callAnthropic(useModel, image, prompt, temperature = 0) {
   const body = {
     model: useModel,
     max_tokens: 4096,
-    // temperature 0 by default: for a "read this receipt exactly" task, we want the
-    // most reproducible answer on the first try. The retry path can pass a higher
-    // temperature — see callModel below for why.
-    temperature,
     messages: [
       {
         role: "user",
@@ -114,7 +111,17 @@ async function callAnthropic(useModel, image, prompt, temperature = 0) {
       },
     ],
   };
-  if (useModel === "claude-sonnet-5") body.thinking = { type: "disabled" };
+  if (useModel === "claude-sonnet-5") {
+    // Confirmed live: Sonnet 5 rejects `temperature` outright when a `thinking` config
+    // is present at all (even explicitly disabled) — "`temperature` is deprecated for
+    // this model." So for this model we skip temperature entirely rather than error.
+    body.thinking = { type: "disabled" };
+  } else {
+    // temperature 0 by default on models that do support it: for a "read this receipt
+    // exactly" task, we want the most reproducible answer on the first try. The retry
+    // path can pass a higher temperature — see callModel below for why.
+    body.temperature = temperature;
+  }
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -138,7 +145,13 @@ async function callAnthropic(useModel, image, prompt, temperature = 0) {
 // normalizes the result into the SAME { content, usage, stop_reason } shape Anthropic
 // returns, so every downstream piece (parseModelJson, tokenCost, retry logic, and the
 // client-side parsing code) works unchanged regardless of which provider answered.
-async function callGemini(useModel, image, prompt, temperature = 0) {
+//
+// Note: temperature is intentionally NOT sent here — newer Gemini models (confirmed
+// live: "`temperature` is deprecated for this model") reject it outright. Unlike
+// Anthropic, where a nonzero temperature is how the retry gets a genuinely different
+// second look, Gemini's retry differentiation comes entirely from the diagnostic retry
+// prompt itself (different input text), which is sufficient on its own.
+async function callGemini(useModel, image, prompt) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     const err = new Error("GEMINI_API_KEY is not configured on the server.");
@@ -157,7 +170,6 @@ async function callGemini(useModel, image, prompt, temperature = 0) {
           },
         ],
         generationConfig: {
-          temperature,
           maxOutputTokens: 4096,
           responseMimeType: "application/json",
         },
@@ -182,9 +194,9 @@ async function callGemini(useModel, image, prompt, temperature = 0) {
 }
 
 async function callModel(useModel, image, prompt, temperature = 0) {
-  return isGeminiModel(useModel)
-    ? callGemini(useModel, image, prompt, temperature)
-    : callAnthropic(useModel, image, prompt, temperature);
+  // Gemini doesn't accept temperature on this model (see callGemini) — silently
+  // dropped for that provider rather than every call site needing to know that.
+  return isGeminiModel(useModel) ? callGemini(useModel, image, prompt) : callAnthropic(useModel, image, prompt, temperature);
 }
 
 // Builds a retry prompt that tells the model exactly what didn't add up on the first
