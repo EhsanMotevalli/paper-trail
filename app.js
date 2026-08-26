@@ -3,6 +3,7 @@ const CATEGORIES = [
   { name: "Groceries", color: "#3D5C43" },
   { name: "Dining", color: "#A8321F" },
   { name: "Transport", color: "#4A6C8C" },
+  { name: "Fuel", color: "#C1592E" },
   { name: "Shopping", color: "#8C5A9C" },
   { name: "Health", color: "#B0763C" },
   { name: "Entertainment", color: "#C48A2E" },
@@ -384,9 +385,9 @@ function plural(n, singularKey, pluralKey) {
 }
 
 const CATEGORY_LABELS = {
-  en: { Groceries: "Groceries", Dining: "Dining", Transport: "Transport", Shopping: "Shopping", Health: "Health", Entertainment: "Entertainment", Utilities: "Utilities", Home: "Home", Other: "Other" },
-  da: { Groceries: "Dagligvarer", Dining: "Restaurant", Transport: "Transport", Shopping: "Indkøb", Health: "Sundhed", Entertainment: "Underholdning", Utilities: "Forsyning", Home: "Hjem", Other: "Andet" },
-  de: { Groceries: "Lebensmittel", Dining: "Restaurant", Transport: "Transport", Shopping: "Einkaufen", Health: "Gesundheit", Entertainment: "Unterhaltung", Utilities: "Nebenkosten", Home: "Zuhause", Other: "Sonstiges" },
+  en: { Groceries: "Groceries", Dining: "Dining", Transport: "Transport", Fuel: "Fuel", Shopping: "Shopping", Health: "Health", Entertainment: "Entertainment", Utilities: "Utilities", Home: "Home", Other: "Other" },
+  da: { Groceries: "Dagligvarer", Dining: "Restaurant", Transport: "Transport", Fuel: "Brændstof", Shopping: "Indkøb", Health: "Sundhed", Entertainment: "Underholdning", Utilities: "Forsyning", Home: "Hjem", Other: "Andet" },
+  de: { Groceries: "Lebensmittel", Dining: "Restaurant", Transport: "Transport", Fuel: "Kraftstoff", Shopping: "Einkaufen", Health: "Gesundheit", Entertainment: "Unterhaltung", Utilities: "Nebenkosten", Home: "Zuhause", Other: "Sonstiges" },
 };
 // IMPORTANT: this is ONLY for display. The underlying category identifiers stored on
 // items (item.category) and used for filtering/matching stay in English always —
@@ -415,6 +416,7 @@ const CATEGORY_KEYWORDS = {
   Health: ["håndsprit","handsprit","sprit","medicin","vitamin","paracetamol","apotek","libresse","bind","tampon","plaster"],
   Home: ["pose","rengøring","opvask","toiletpapir","vaskepulver","køkkenrulle","affaldspose","lys ","stearinlys"],
   Dining: ["kaffe to go","bakery","bageri","café","restaurant","frokost"],
+  Fuel: ["benzin","diesel","brændstof","tankning","el-ladning","opladning","fuel","petrol","gasoline"],
   Groceries: [
     "mælk","ost","hytteost","kylling","okse","laks","fisk","banan","æg","æggebægre","gulerødder","agurk","peber",
     "squash","iceberg","salat","avocado","blomme","blomkål","kakao","rugbrød","levain","solgryn","brød","frugt",
