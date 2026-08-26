@@ -442,8 +442,9 @@ Rules:
 - Find the payment method line, usually near the total — e.g. "Betalingskort", "VISA", "Dankort", "Mastercard", "MobilePay", "Kontant/Cash" — often followed by a partially masked card number the STORE has already printed masked for security, like "**** **** **** 1234" or "xxxx1234". Copy this masked payment line exactly as printed (never invent or unmask digits — only transcribe what's already partially hidden on the receipt) into "paymentMethod". Use "" if paid in cash or nothing is visible.
 - If there's a barcode near the bottom of the receipt, it usually has its own human-readable number printed directly below or beside the bars (the same digits the barcode itself encodes). Transcribe that digit/character string exactly into "barcodeNumber". Use "" if there's no barcode or no readable number under it — never guess or invent digits you can't actually read.
 - Ignore lines for TOTAL, subtotal, and VAT/MOMS — these are not purchased items and are not the receipt number or payment method.
+- Focus entirely on the receipt's printed text and numbers. Photos often include background clutter around the receipt — a table, rug, hand, shadows, folds — ignore all of that completely; it is never part of the data you're extracting.
 - Find the printed TOTAL and report it exactly in the "total" field — it's usually one bold, isolated line near the bottom, and is the single most important number to get right.
-- Before finalizing, add up the "price" of every item yourself and compare it to the printed TOTAL you found. If your items don't sum to the total, re-examine the receipt: you likely misread a price, merged a multi-line item incorrectly, duplicated a quantity line as its own item, or skipped something — fix it so your item list actually reconciles with the printed total as closely as possible.
+- Before finalizing, add up the "price" of every item yourself and compare it to the printed TOTAL you found. Use this only as a way to CATCH mistakes — if the two don't match, re-examine the receipt for a genuinely misread price, an incorrectly merged multi-line item, a duplicated quantity line, or a skipped item, and correct whichever of those you actually find. Do NOT adjust an item's price, invent a phantom item, or change the total just to force the numbers to agree artificially — report your honest best reading of each value even if a real, unexplained gap remains between the items and the total. A truthful mismatch is far more useful than a fake match.
 - Prices are plain numbers using a dot for decimals (convert Danish comma-decimals, e.g. "19,95" -> 19.95).
 - For every item, pick the closest category from exactly this list: ${catList}.
 
@@ -510,7 +511,12 @@ function fileToBase64(file, maxDim = 2000) {
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
-      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      const ctx = canvas.getContext("2d");
+      // A mild contrast/brightness boost — helps thin thermal-printer text stand out
+      // from the paper without over-processing the photo (a heavy filter can hurt a
+      // vision model more than it helps, unlike old-school OCR). Kept subtle on purpose.
+      ctx.filter = "contrast(1.18) brightness(1.06) saturate(0.95)";
+      ctx.drawImage(img, 0, 0, width, height);
       resolve(canvas.toDataURL("image/jpeg", 0.88).split(",")[1]);
     };
     img.onerror = reject;
