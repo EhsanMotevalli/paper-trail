@@ -432,7 +432,7 @@ function buildExtractionPrompt() {
 Today's date is ${todayStr} — use this only to resolve ambiguous 2-digit years on the receipt (e.g. "26" almost certainly means 2026, not some other century), never as a fallback value to fill in when you can't find a date.
 
 Rules:
-- Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the NET amount actually paid AFTER the discount (e.g. 19,95 with a 7,00 rabat -> price 12.95), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Do not list "RABAT" as its own item.
+- Danish receipts often show a discount as a separate "RABAT" line directly under the item it discounts, with a trailing "-" (e.g. "RABAT 7,00-"). Report the item's "price" as the GROSS amount exactly as printed on that item's own line (e.g. 19,95 in that example — do NOT subtract the discount yourself), and separately report the discount amount in a "discount" field (7.00 in that example; use 0 if there was no discount on that line). Just transcribe both numbers as printed — the app calculates the net amount itself. Do not list "RABAT" as its own item.
 - Multi-buy lines look like "2 x 40,00" followed by the line's actual total (e.g. "80,00"), sometimes on the same line, sometimes wrapped onto the next line. Use the TOTAL as the item's price, never the unit price. If a product name has NO price on its own line, its price comes from the next line (a quantity line, or a plain amount) — pair those into ONE item. But this only applies when the name line truly has no price of its own: if a line already ends in its own price (e.g. "KOKO BANAN M CHOKO   35,00"), that is already a complete, standalone item — do NOT merge it with whatever comes after. A following line with no price of its own (e.g. "ÆGGEBÆGRE") followed by a quantity+total line is its own SEPARATE item, not a continuation of the item before it. Rule of thumb: every line that already has a price ends an item right there; only a price-less line reaches forward to grab the next line's price.
 - Before merging any two lines into one item, sanity-check the MEANING as well as the layout: do the words plausibly describe the same single product, or two different things? "KOKO BANAN M CHOKO" (a chocolate-covered banana snack) and "ÆGGEBÆGRE" (egg cups) are unrelated products that happen to sit on adjacent lines — merging them because of layout alone is wrong. A real multi-line product name reads as one continuous phrase (e.g. "ØKO ARLA LETMÆLK" continuing to "1L" or "SPAR RIBBENSTEG" continuing to "FRILAND" both clearly describe one item). If adjacent lines don't plausibly name the same product, treat them as separate items even if the layout alone looked mergeable.
 - Work top-to-bottom in strict printed order and keep each product name aligned with the price on the same printed row. If a row's price is hard to read, look at neighboring rows to sanity-check your alignment hasn't drifted — a common mistake is prices sliding down or up by one row partway through a long receipt.
@@ -538,13 +538,23 @@ async function handleFile(file) {
     showProgress(true, t("readingWithAI"), 0.55);
     const ai = await callClaudeVision(base64);
     const store = (ai.store || "Unknown store").toString().slice(0, 60);
-    const items = (ai.items || []).map((it) => ({
-      id: uid(),
-      product: (it.product || "Item").toString().slice(0, 80),
-      price: Number(it.price) || 0,
-      discount: Number(it.discount) || 0, // gross line price = price + discount; used only for the built-receipt reconstruction
-      category: CATEGORIES.some((c) => c.name === it.category) ? it.category : guessCategory(it.product, store),
-    }));
+    const items = (ai.items || []).map((it) => {
+      // The model reports the GROSS printed line price and the discount separately —
+      // it does NOT do the subtraction itself. Models are unreliable at "report X minus
+      // Y" arithmetic mid-extraction (it was quietly reporting gross as if it were net,
+      // which silently double-counted almost the entire discount total). Plain JS
+      // subtraction is 100% reliable, so we do it here instead.
+      const gross = Number(it.price) || 0;
+      const discount = Math.max(0, Number(it.discount) || 0);
+      const net = Math.max(0, Math.round((gross - discount) * 100) / 100);
+      return {
+        id: uid(),
+        product: (it.product || "Item").toString().slice(0, 80),
+        price: net, // net = what was actually paid; this is what all spend tracking uses
+        discount, // kept separately so the built receipt can reconstruct: gross line + RABAT line
+        category: CATEGORIES.some((c) => c.name === it.category) ? it.category : guessCategory(it.product, store),
+      };
+    });
     const itemsSum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
     const aiTotal = Math.round((Number(ai.total) || 0) * 100) / 100;
     // The printed TOTAL is one clean, usually bold line — far less error-prone to read
@@ -1019,10 +1029,13 @@ function renderReceiptCanvas(r) {
   const measure = document.createElement("canvas").getContext("2d");
   measure.font = FONT_BODY;
   const itemBlocks = (r.items || []).map((it) => {
-    const priceStr = `${Number(it.price).toFixed(2)}`;
+    const discount = Number(it.discount) || 0;
+    // it.price is the NET amount actually paid; reconstruct the GROSS line price for
+    // display (matching what was actually printed on the paper receipt).
+    const grossPrice = Math.round((Number(it.price) + discount) * 100) / 100;
+    const priceStr = `${grossPrice.toFixed(2)}`;
     const priceW = measure.measureText(priceStr).width;
     const nameLines = wrapCanvasText(measure, it.product, contentW - priceW - 14);
-    const discount = Number(it.discount) || 0;
     return { nameLines, priceStr, discountStr: discount > 0 ? `-${discount.toFixed(2)}` : null };
   });
   let bodyLines = 0;
