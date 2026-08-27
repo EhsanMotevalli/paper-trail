@@ -29,7 +29,7 @@ function getClient() {
   return clientPromise;
 }
 
-const SCAN_CAP = 50;
+const SCAN_CAP = 500;
 // $ per million tokens. Update if pricing changes.
 // gemini-2.5-flash was retired by Google before this app even shipped (confirmed live,
 // "no longer available to new users") — swapped to gemini-3.6-flash, Google's own
