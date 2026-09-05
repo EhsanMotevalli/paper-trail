@@ -1401,6 +1401,55 @@ document.getElementById("lightbox-img").addEventListener("click", () => {
   setLightboxZoom(lightboxZoom > 100 ? 100 : 200);
 });
 
+// Real two-finger pinch-to-zoom, anchored so the point between your fingers stays put
+// as you zoom — not just the +/- buttons. Single-finger pan/scroll already works
+// natively via the scrollable viewport (touch-action: pan-x pan-y), no JS needed there.
+let pinchState = null;
+function touchDist(t1, t2) {
+  return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+}
+const lightboxViewport = document.getElementById("lightbox-viewport");
+lightboxViewport.addEventListener(
+  "touchstart",
+  (e) => {
+    if (e.touches.length === 2) {
+      const rect = lightboxViewport.getBoundingClientRect();
+      pinchState = {
+        startDist: touchDist(e.touches[0], e.touches[1]),
+        touchX: (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left,
+        touchY: (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top,
+      };
+    }
+  },
+  { passive: true }
+);
+lightboxViewport.addEventListener(
+  "touchmove",
+  (e) => {
+    if (e.touches.length === 2 && pinchState) {
+      e.preventDefault(); // stop the browser's own native page-pinch from also firing
+      const dist = touchDist(e.touches[0], e.touches[1]);
+      const scaleFactor = dist / pinchState.startDist;
+      const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(lightboxZoom * scaleFactor)));
+      const relativeScale = newZoom / lightboxZoom;
+      const preLeft = lightboxViewport.scrollLeft;
+      const preTop = lightboxViewport.scrollTop;
+      setLightboxZoom(newZoom);
+      lightboxViewport.scrollLeft = (preLeft + pinchState.touchX) * relativeScale - pinchState.touchX;
+      lightboxViewport.scrollTop = (preTop + pinchState.touchY) * relativeScale - pinchState.touchY;
+      pinchState.startDist = dist; // recalibrate so each frame's scale factor is incremental, not cumulative
+    }
+  },
+  { passive: false }
+);
+lightboxViewport.addEventListener(
+  "touchend",
+  (e) => {
+    if (e.touches.length < 2) pinchState = null;
+  },
+  { passive: true }
+);
+
 document.getElementById("photos-grid").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-open-photo]");
   if (!btn) return;
@@ -1432,7 +1481,7 @@ document.getElementById("btn-lightbox-view").addEventListener("click", (e) => {
   const id = e.currentTarget.dataset.receiptId;
   closeLightbox();
   viewMode = "list";
-  document.querySelectorAll("#view-toggle button").forEach((b) => b.classList.toggle("active", b.dataset.view === "list"));
+  document.querySelectorAll("#bottom-nav .nav-tab").forEach((b) => b.classList.toggle("active", b.dataset.view === "list"));
   searchQuery = "";
   document.getElementById("search-input").value = "";
   expandedId = id;
@@ -1442,11 +1491,11 @@ document.getElementById("btn-lightbox-view").addEventListener("click", (e) => {
   document.getElementById("receipts-list").scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
-document.getElementById("view-toggle").addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-view]");
+document.getElementById("bottom-nav").addEventListener("click", (e) => {
+  const btn = e.target.closest(".nav-tab");
   if (!btn) return;
   viewMode = btn.dataset.view;
-  document.querySelectorAll("#view-toggle button").forEach((b) => b.classList.toggle("active", b.dataset.view === viewMode));
+  document.querySelectorAll("#bottom-nav .nav-tab").forEach((b) => b.classList.toggle("active", b.dataset.view === viewMode));
   applyViewVisibility();
   if (viewMode === "photos") renderPhotosGrid();
   if (viewMode === "built") renderBuiltGrid();

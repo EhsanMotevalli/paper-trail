@@ -23,7 +23,7 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-.wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 60px; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px calc(84px + env(safe-area-inset-bottom)); }
 
 .install-banner { display: flex; align-items: center; gap: 10px; background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; font-size: 12.5px; line-height: 1.5; }
 .install-banner .ios-share-icon { flex-shrink: 0; }
@@ -118,9 +118,12 @@ body {
 .month-cat-bar-track { height: 4px; background: var(--paper-dark); border-radius: 2px; margin: 0 0 8px 15px; overflow: hidden; }
 .month-cat-bar-fill { height: 100%; }
 
-.view-toggle { display: inline-flex; gap: 4px; background: var(--paper-dark); border-radius: 8px; padding: 3px; margin-bottom: 14px; }
-.view-toggle button { background: transparent; border: none; color: var(--ink); border-radius: 6px; padding: 6px 16px; font-size: 12.5px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; }
-.view-toggle button.active { background: var(--white); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: var(--white); border-top: 1px solid var(--line); padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); z-index: 40; box-shadow: 0 -2px 10px rgba(43,38,32,0.06); }
+.nav-tab { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 8px 4px 6px; background: none; border: none; color: var(--ink-light); font-family: 'IBM Plex Mono', monospace; cursor: pointer; border-radius: 10px; min-height: 48px; }
+.nav-tab:active { background: var(--paper-dark); }
+.nav-tab.active { color: var(--forest); }
+.nav-icon { font-size: 21px; line-height: 1; }
+.nav-label { font-size: 10.5px; letter-spacing: .01em; }
 
 .photos-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .photo-thumb { position: relative; aspect-ratio: 3/4; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--white); padding: 0; cursor: pointer; }
@@ -129,7 +132,7 @@ body {
 .photo-thumb-label span { opacity: 0.75; }
 
 .lightbox-card { position: relative; background: var(--paper); border-radius: 14px; padding: 14px; width: 92%; max-width: 480px; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-.lightbox-viewport { width: 100%; max-height: 58vh; overflow: auto; border-radius: 8px; background: #000; touch-action: pan-x pan-y pinch-zoom; }
+.lightbox-viewport { width: 100%; max-height: 58vh; overflow: auto; border-radius: 8px; background: #000; touch-action: pan-x pan-y; }
 .lightbox-viewport img { display: block; width: 100%; height: auto; object-fit: contain; transform-origin: top left; transition: width .15s ease; }
 .lightbox-zoom-controls { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; }
 .zoom-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--white); color: var(--ink); font-size: 18px; font-family: 'IBM Plex Mono', monospace; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; }

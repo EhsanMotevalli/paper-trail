@@ -118,12 +118,6 @@
       <div id="month-results"></div>
     </div>
 
-    <div class="view-toggle" id="view-toggle">
-      <button data-view="list" class="active" data-i18n="listView">List</button>
-      <button data-view="photos" data-i18n="photosView">Photos</button>
-      <button data-view="built" data-i18n="builtView">Receipts</button>
-    </div>
-
     <input id="search-input" class="f search-input" placeholder="🔍 Search items — e.g. mælk, coffee, kylling" data-i18n-placeholder="searchPlaceholder" />
     <div id="search-results" style="display:none;"></div>
 
@@ -132,6 +126,21 @@
     <div id="photos-grid" class="photos-grid" style="display:none;"></div>
     <div id="built-grid" class="photos-grid" style="display:none;"></div>
   </div>
+
+  <nav id="bottom-nav" class="bottom-nav">
+    <button class="nav-tab active" data-view="list">
+      <span class="nav-icon">&#9776;</span>
+      <span class="nav-label" data-i18n="listView">List</span>
+    </button>
+    <button class="nav-tab" data-view="photos">
+      <span class="nav-icon">&#128247;</span>
+      <span class="nav-label" data-i18n="photosView">Photos</span>
+    </button>
+    <button class="nav-tab" data-view="built">
+      <span class="nav-icon">&#129534;</span>
+      <span class="nav-label" data-i18n="builtView">Receipts</span>
+    </button>
+  </nav>
 
   <div id="image-lightbox" class="modal-overlay" style="display:none;">
     <div id="lightbox-backdrop" class="modal-backdrop"></div>
