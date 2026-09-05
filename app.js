@@ -141,7 +141,7 @@ let granularity = "day";
 let expandedId = null;
 let editingId = null;
 let searchQuery = "";
-let viewMode = "list"; // "list" | "photos"
+let viewMode = "capture"; // "capture" | "analytics" | "list" | "photos" | "built"
 let receiptsWithPhotos = new Set(); // receipt ids that have a saved photo (for the 📷 badge)
 let photoImagesCache = {}; // receiptId -> dataURL, populated when the Photos tab loads
 
@@ -262,7 +262,8 @@ const TRANSLATIONS = {
     dzHint: "Drop a receipt image, or —", takePhoto: "Take photo", upload: "Upload", addManually: "Add manually",
     readingReceipt: "Reading your receipt…", groupNamePlaceholder: "Group name (e.g. Home)", createGroup: "Create group",
     total: "Total", day: "Day", week: "Week", month: "Month", lookUpMonth: "Look up a month",
-    listView: "List", photosView: "Photos", builtView: "Receipts",
+    listView: "List", photosView: "Photos", builtView: "Receipts", captureView: "Scan", analyticsView: "Insights",
+    captureTitle: "Scan a receipt", captureSubtitle: "Snap it. We'll do the rest.",
     searchPlaceholder: "🔍 Search items — e.g. mælk, coffee, kylling",
     close: "Close", download: "Download", share: "Share", viewReceiptDetails: "View receipt details",
     statToday: "Today", statWeek: "This week", statMonth: "This month", flat: "— flat",
@@ -283,6 +284,8 @@ const TRANSLATIONS = {
     retakeSuggestion: "This receipt didn't read cleanly — try retaking the photo flatter and better lit for a more accurate result.",
     unmatchNoFlags: (amt) => `${amt} kr. doesn't add up — try retaking the photo flatter and better lit for a more accurate result.`,
     unmatchWithFlags: (amt, n) => `${amt} kr. doesn't add up — ${n} flagged item${n !== 1 ? "s" : ""} below may be why. Fix ${n !== 1 ? "them" : "it"}, or retake the photo for a cleaner read.`,
+    batchAdded: (added, total) => `✓ Added ${added} of ${total} receipt${total !== 1 ? "s" : ""}.`,
+    batchFailed: (n) => `${n} receipt${n !== 1 ? "s" : ""} couldn't be read — try retaking ${n !== 1 ? "them" : "it"}.`,
     lowConfidenceFlag: "The AI wasn't fully sure about this line — worth checking against the photo.",
     refLabel: "Ref:", reconstructedFooter: "Reconstructed from scanned receipt data",
     uploadingPhoto: "Uploading photo…", readingWithAI: "Reading receipt with AI…", savingPhoto: "Saving photo…", working: "Working…",
@@ -302,7 +305,8 @@ const TRANSLATIONS = {
     dzHint: "Træk et kvitteringsbillede herind, eller —", takePhoto: "Tag foto", upload: "Upload", addManually: "Tilføj manuelt",
     readingReceipt: "Læser din kvittering…", groupNamePlaceholder: "Gruppenavn (f.eks. Hjem)", createGroup: "Opret gruppe",
     total: "Total", day: "Dag", week: "Uge", month: "Måned", lookUpMonth: "Slå en måned op",
-    listView: "Liste", photosView: "Fotos", builtView: "Kvitteringer",
+    listView: "Liste", photosView: "Fotos", builtView: "Kvitteringer", captureView: "Scan", analyticsView: "Indblik",
+    captureTitle: "Scan en kvittering", captureSubtitle: "Tag et billede. Vi klarer resten.",
     searchPlaceholder: "🔍 Søg i varer — f.eks. mælk, kaffe, kylling",
     close: "Luk", download: "Download", share: "Del", viewReceiptDetails: "Se kvitteringsdetaljer",
     statToday: "I dag", statWeek: "Denne uge", statMonth: "Denne måned", flat: "— uændret",
@@ -323,6 +327,8 @@ const TRANSLATIONS = {
     retakeSuggestion: "Denne kvittering blev ikke læst korrekt — prøv at tage billedet igen, fladere og bedre belyst, for et mere præcist resultat.",
     unmatchNoFlags: (amt) => `${amt} kr. går ikke op — prøv at tage billedet igen, fladere og bedre belyst, for et mere præcist resultat.`,
     unmatchWithFlags: (amt, n) => `${amt} kr. går ikke op — ${n} markeret${n !== 1 ? "de" : ""} vare${n !== 1 ? "r" : ""} nedenfor kan være årsagen. Ret ${n !== 1 ? "dem" : "den"}, eller tag billedet igen.`,
+    batchAdded: (added, total) => `✓ Tilføjede ${added} af ${total} kvittering${total !== 1 ? "er" : ""}.`,
+    batchFailed: (n) => `${n} kvittering${n !== 1 ? "er" : ""} kunne ikke læses — prøv at tage ${n !== 1 ? "dem" : "den"} igen.`,
     lowConfidenceFlag: "AI'en var ikke helt sikker på denne linje — værd at tjekke mod fotoet.",
     refLabel: "Ref:", reconstructedFooter: "Genskabt fra scannede kvitteringsdata",
     uploadingPhoto: "Uploader foto…", readingWithAI: "Læser kvittering med AI…", savingPhoto: "Gemmer foto…", working: "Arbejder…",
@@ -342,7 +348,8 @@ const TRANSLATIONS = {
     dzHint: "Beleg-Foto hierher ziehen, oder —", takePhoto: "Foto aufnehmen", upload: "Hochladen", addManually: "Manuell hinzufügen",
     readingReceipt: "Beleg wird gelesen…", groupNamePlaceholder: "Gruppenname (z. B. Zuhause)", createGroup: "Gruppe erstellen",
     total: "Gesamt", day: "Tag", week: "Woche", month: "Monat", lookUpMonth: "Monat nachschlagen",
-    listView: "Liste", photosView: "Fotos", builtView: "Belege",
+    listView: "Liste", photosView: "Fotos", builtView: "Belege", captureView: "Scannen", analyticsView: "Einblicke",
+    captureTitle: "Beleg scannen", captureSubtitle: "Foto machen. Wir erledigen den Rest.",
     searchPlaceholder: "🔍 Artikel suchen — z. B. Milch, Kaffee, Hähnchen",
     close: "Schließen", download: "Herunterladen", share: "Teilen", viewReceiptDetails: "Belegdetails ansehen",
     statToday: "Heute", statWeek: "Diese Woche", statMonth: "Dieser Monat", flat: "— unverändert",
@@ -363,6 +370,8 @@ const TRANSLATIONS = {
     retakeSuggestion: "Dieser Beleg wurde nicht sauber gelesen — versuche das Foto flacher und besser beleuchtet erneut aufzunehmen für ein genaueres Ergebnis.",
     unmatchNoFlags: (amt) => `${amt} kr. gehen nicht auf — versuche das Foto flacher und besser beleuchtet erneut aufzunehmen.`,
     unmatchWithFlags: (amt, n) => `${amt} kr. gehen nicht auf — ${n} markierte${n !== 1 ? "" : "r"} Artikel unten könnte${n !== 1 ? "n" : ""} der Grund sein. Korrigiere ${n !== 1 ? "sie" : "ihn"} oder mach das Foto erneut.`,
+    batchAdded: (added, total) => `✓ ${added} von ${total} Beleg${total !== 1 ? "en" : ""} hinzugefügt.`,
+    batchFailed: (n) => `${n} Beleg${n !== 1 ? "e" : ""} konnte${n !== 1 ? "n" : ""} nicht gelesen werden — versuche es erneut.`,
     lowConfidenceFlag: "Die KI war sich bei dieser Zeile nicht ganz sicher — lohnt sich, mit dem Foto zu vergleichen.",
     refLabel: "Ref.:", reconstructedFooter: "Aus gescannten Belegdaten rekonstruiert",
     uploadingPhoto: "Foto wird hochgeladen…", readingWithAI: "Beleg wird mit KI gelesen…", savingPhoto: "Foto wird gespeichert…", working: "Wird verarbeitet…",
@@ -597,93 +606,144 @@ function currentUnmatchedAmount(r) {
   return amt > 0.01 ? amt : null;
 }
 
-async function handleFile(file) {
-  if (!file) return;
+let scanToastTimer = null;
+function showScanToast(message) {
+  const el = document.getElementById("scan-toast");
+  if (!el) return;
+  el.textContent = message;
+  el.style.display = "block";
+  el.classList.remove("toast-hide");
+  clearTimeout(scanToastTimer);
+  scanToastTimer = setTimeout(() => {
+    el.classList.add("toast-hide");
+    setTimeout(() => {
+      el.style.display = "none";
+    }, 300);
+  }, 3500);
+}
+
+// Reads and extracts ONE receipt file, returning the finished receipt object. Does NOT
+// persist or touch page navigation — that's handleFiles' job, so a batch of several
+// files can be processed one-by-one and saved together at the end.
+async function processSingleFile(file, progressLabel) {
+  showProgress(true, progressLabel, 0.15);
+  const base64 = await fileToBase64(file);
+  showProgress(true, progressLabel, 0.55);
+  const ai = await callClaudeVision(base64);
+  const store = (ai.store || "Unknown store").toString().slice(0, 60);
+  const rawItems = (ai.items || []).map((it) => {
+    // The model reports the GROSS printed line price and the discount separately —
+    // it does NOT do the subtraction itself. Models are unreliable at "report X minus
+    // Y" arithmetic mid-extraction (it was quietly reporting gross as if it were net,
+    // which silently double-counted almost the entire discount total). Plain JS
+    // subtraction is 100% reliable, so we do it here instead.
+    const gross = Number(it.price) || 0;
+    const discount = Math.max(0, Number(it.discount) || 0);
+    const net = Math.max(0, Math.round((gross - discount) * 100) / 100);
+    return {
+      id: uid(),
+      product: (it.product || "Item").toString().slice(0, 80),
+      price: net, // net = what was actually paid; this is what all spend tracking uses
+      discount, // kept separately so the built receipt can reconstruct: gross line + RABAT line
+      category: CATEGORIES.some((c) => c.name === it.category) ? it.category : guessCategory(it.product, store),
+      lowConfidence: !!it.lowConfidence,
+    };
+  });
+  const items = foldMisreadDiscountLines(rawItems);
+  const itemsSum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
+  const aiTotal = Math.round((Number(ai.total) || 0) * 100) / 100;
+  // The printed TOTAL is one clean, usually bold line — far less error-prone to read
+  // than 20-30 individual item lines. Trust it as ground truth. If the items don't add
+  // up to it, something in the item list is wrong (a misread price, a missed item, a
+  // duplicated line) — rather than hide that, add a visible adjustment line so the
+  // total is always correct AND the gap is obvious enough to go check against the photo.
+  let total;
+  if (aiTotal > 0) {
+    total = aiTotal;
+    const diff = Math.round((aiTotal - itemsSum) * 100) / 100;
+    if (Math.abs(diff) >= 0.05) {
+      items.push({
+        id: uid(),
+        product: "Unmatched — check items vs. photo",
+        price: diff,
+        discount: 0,
+        category: "Other",
+      });
+    }
+  } else {
+    total = itemsSum;
+  }
+  const receipt = {
+    id: uid(),
+    store,
+    location: (ai.location || "").toString().slice(0, 80),
+    date: (() => {
+      const d = String(ai.date || "");
+      // A receipt can't be dated in the future — that's a sign the model latched onto
+      // an unrelated number (till/bon number, etc.) instead of the actual date.
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d <= todayISO()) return d;
+      return todayISO();
+    })(),
+    currency: ai.currency || DEFAULT_CURRENCY,
+    receiptNumber: (ai.receiptNumber || "").toString().slice(0, 60),
+    paymentMethod: (ai.paymentMethod || "").toString().slice(0, 60),
+    barcodeNumber: (ai.barcodeNumber || "").toString().replace(/[^\w-]/g, "").slice(0, 40),
+    needsRetake: !!ai._needsRetake,
+    items,
+    total,
+  };
+  showProgress(true, t("savingPhoto"), 0.92);
+  const saved = await saveImage(receipt.id, `data:image/jpeg;base64,${base64}`);
+  if (saved) receiptsWithPhotos.add(receipt.id);
+  return receipt;
+}
+
+// Handles one or many files (multi-select upload, or multiple files dropped at once).
+// Processes them sequentially — not in parallel — so progress feedback stays coherent
+// and one bad receipt can't derail the rest of the batch. Stays on the capture page
+// throughout (no auto-navigation), showing a toast instead, so scanning several
+// receipts in a row is just "tap, tap, tap" without losing your place.
+async function handleFiles(fileList) {
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (files.length === 0) return;
   showError(null);
   if (!getUserName()) {
     showError(t("enterNameError"));
     openSettings();
     return;
   }
-  showProgress(true, t("uploadingPhoto"), 0.15);
-  try {
-    const base64 = await fileToBase64(file);
-    showProgress(true, t("readingWithAI"), 0.55);
-    const ai = await callClaudeVision(base64);
-    const store = (ai.store || "Unknown store").toString().slice(0, 60);
-    const rawItems = (ai.items || []).map((it) => {
-      // The model reports the GROSS printed line price and the discount separately —
-      // it does NOT do the subtraction itself. Models are unreliable at "report X minus
-      // Y" arithmetic mid-extraction (it was quietly reporting gross as if it were net,
-      // which silently double-counted almost the entire discount total). Plain JS
-      // subtraction is 100% reliable, so we do it here instead.
-      const gross = Number(it.price) || 0;
-      const discount = Math.max(0, Number(it.discount) || 0);
-      const net = Math.max(0, Math.round((gross - discount) * 100) / 100);
-      return {
-        id: uid(),
-        product: (it.product || "Item").toString().slice(0, 80),
-        price: net, // net = what was actually paid; this is what all spend tracking uses
-        discount, // kept separately so the built receipt can reconstruct: gross line + RABAT line
-        category: CATEGORIES.some((c) => c.name === it.category) ? it.category : guessCategory(it.product, store),
-        lowConfidence: !!it.lowConfidence,
-      };
-    });
-    const items = foldMisreadDiscountLines(rawItems);
-    const itemsSum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
-    const aiTotal = Math.round((Number(ai.total) || 0) * 100) / 100;
-    // The printed TOTAL is one clean, usually bold line — far less error-prone to read
-    // than 20-30 individual item lines. Trust it as ground truth. If the items don't add
-    // up to it, something in the item list is wrong (a misread price, a missed item, a
-    // duplicated line) — rather than hide that, add a visible adjustment line so the
-    // total is always correct AND the gap is obvious enough to go check against the photo.
-    let total;
-    if (aiTotal > 0) {
-      total = aiTotal;
-      const diff = Math.round((aiTotal - itemsSum) * 100) / 100;
-      if (Math.abs(diff) >= 0.05) {
-        items.push({
-          id: uid(),
-          product: "Unmatched — check items vs. photo",
-          price: diff,
-          discount: 0,
-          category: "Other",
-        });
-      }
-    } else {
-      total = itemsSum;
+
+  const added = [];
+  const failures = [];
+  for (let i = 0; i < files.length; i++) {
+    const label = files.length > 1 ? `${t("readingWithAI")} (${i + 1}/${files.length})` : t("readingWithAI");
+    try {
+      const receipt = await processSingleFile(files[i], label);
+      added.push(receipt);
+    } catch (e) {
+      console.error(e);
+      failures.push(e);
     }
-    const receipt = {
-      id: uid(),
-      store,
-      location: (ai.location || "").toString().slice(0, 80),
-      date: (() => {
-        const d = String(ai.date || "");
-        // A receipt can't be dated in the future — that's a sign the model latched onto
-        // an unrelated number (till/bon number, etc.) instead of the actual date.
-        if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d <= todayISO()) return d;
-        return todayISO();
-      })(),
-      currency: ai.currency || DEFAULT_CURRENCY,
-      receiptNumber: (ai.receiptNumber || "").toString().slice(0, 60),
-      paymentMethod: (ai.paymentMethod || "").toString().slice(0, 60),
-      barcodeNumber: (ai.barcodeNumber || "").toString().replace(/[^\w-]/g, "").slice(0, 40),
-      needsRetake: !!ai._needsRetake,
-      items,
-      total,
-    };
-    showProgress(true, t("savingPhoto"), 0.92);
-    const saved = await saveImage(receipt.id, `data:image/jpeg;base64,${base64}`);
-    if (saved) receiptsWithPhotos.add(receipt.id);
-    persist([receipt, ...receipts]);
-    expandedId = receipt.id;
-    editingId = receipt.id;
+  }
+  showProgress(false);
+
+  if (added.length > 0) {
+    persist([...added.slice().reverse(), ...receipts]);
+    const last = added[added.length - 1];
+    expandedId = last.id;
+    editingId = last.id;
     renderAll();
-  } catch (e) {
-    console.error(e);
-    showError(e.message || t("couldntRead"));
-  } finally {
-    showProgress(false);
+  }
+
+  if (files.length === 1) {
+    if (added.length === 1) {
+      showScanToast(`✓ ${added[0].store} — ${added[0].total.toFixed(2)} kr.`);
+    } else if (failures.length === 1) {
+      showError(failures[0].message || t("couldntRead"));
+    }
+  } else {
+    if (added.length > 0) showScanToast(t("batchAdded")(added.length, files.length));
+    if (failures.length > 0) showError(t("batchFailed")(failures.length));
   }
 }
 
@@ -700,6 +760,7 @@ function addManual() {
   persist([receipt, ...receipts]);
   expandedId = receipt.id;
   editingId = receipt.id;
+  goToPage("list");
   renderAll();
 }
 
@@ -808,7 +869,7 @@ function showError(msg) {
   box.innerHTML = `<span>&#9888;</span><span>${esc(msg)}</span>`;
 }
 function showProgress(on, label, progress) {
-  document.getElementById("dz-idle").style.display = on ? "none" : "block";
+  document.getElementById("capture-idle").style.display = on ? "none" : "block";
   document.getElementById("dz-progress").style.display = on ? "flex" : "none";
   if (on) {
     document.getElementById("progress-text").textContent = label || t("working");
@@ -1331,7 +1392,7 @@ async function renderPhotosGrid() {
   grid.innerHTML = `<div class="empty-state">${t("readingReceipt")}</div>`;
   photoImagesCache = await getAllImages();
   const withPhotos = receipts.filter((r) => photoImagesCache[r.id]);
-  document.getElementById("count-label").textContent = plural(withPhotos.length, "photoWord", "photosWord");
+  document.getElementById("photos-count-label").textContent = plural(withPhotos.length, "photoWord", "photosWord");
 
   if (withPhotos.length === 0) {
     grid.innerHTML = `<div class="empty-state">${t("noSavedPhotos")}</div>`;
@@ -1351,7 +1412,7 @@ async function renderPhotosGrid() {
 
 function renderBuiltGrid() {
   const grid = document.getElementById("built-grid");
-  document.getElementById("count-label").textContent = plural(receipts.length, "builtReceiptWord", "builtReceiptsWord");
+  document.getElementById("built-count-label").textContent = plural(receipts.length, "builtReceiptWord", "builtReceiptsWord");
   if (receipts.length === 0) {
     grid.innerHTML = `<div class="empty-state">${t("noBuiltReceipts")}</div>`;
     return;
@@ -1480,13 +1541,11 @@ document.getElementById("btn-lightbox-share").addEventListener("click", (e) => {
 document.getElementById("btn-lightbox-view").addEventListener("click", (e) => {
   const id = e.currentTarget.dataset.receiptId;
   closeLightbox();
-  viewMode = "list";
-  document.querySelectorAll("#bottom-nav .nav-tab").forEach((b) => b.classList.toggle("active", b.dataset.view === "list"));
   searchQuery = "";
   document.getElementById("search-input").value = "";
   expandedId = id;
   editingId = null;
-  applyViewVisibility();
+  goToPage("list");
   renderSearchOrList();
   document.getElementById("receipts-list").scrollIntoView({ behavior: "smooth", block: "start" });
 });
@@ -1494,21 +1553,31 @@ document.getElementById("btn-lightbox-view").addEventListener("click", (e) => {
 document.getElementById("bottom-nav").addEventListener("click", (e) => {
   const btn = e.target.closest(".nav-tab");
   if (!btn) return;
-  viewMode = btn.dataset.view;
-  document.querySelectorAll("#bottom-nav .nav-tab").forEach((b) => b.classList.toggle("active", b.dataset.view === viewMode));
-  applyViewVisibility();
-  if (viewMode === "photos") renderPhotosGrid();
-  if (viewMode === "built") renderBuiltGrid();
+  goToPage(btn.dataset.view);
 });
 
 function applyViewVisibility() {
   const hasQuery = !!searchQuery;
-  const isList = viewMode === "list";
-  document.getElementById("search-input").style.display = isList ? "" : "none";
-  document.getElementById("search-results").style.display = isList && hasQuery ? "block" : "none";
-  document.getElementById("receipts-list").style.display = isList && !hasQuery ? "" : "none";
-  document.getElementById("photos-grid").style.display = viewMode === "photos" ? "grid" : "none";
-  document.getElementById("built-grid").style.display = viewMode === "built" ? "grid" : "none";
+  document.getElementById("page-capture").style.display = viewMode === "capture" ? "block" : "none";
+  document.getElementById("page-analytics").style.display = viewMode === "analytics" ? "block" : "none";
+  document.getElementById("page-list").style.display = viewMode === "list" ? "block" : "none";
+  document.getElementById("page-photos").style.display = viewMode === "photos" ? "block" : "none";
+  document.getElementById("page-built").style.display = viewMode === "built" ? "block" : "none";
+
+  // Within the List page specifically: search results replace the normal receipts list.
+  document.getElementById("search-results").style.display = hasQuery ? "block" : "none";
+  document.getElementById("receipts-list").style.display = hasQuery ? "none" : "";
+}
+
+// Single place that switches pages, updates the bottom nav's active state, and triggers
+// whatever that page needs freshly rendered — used both by nav taps and by code that
+// needs to jump the user somewhere (e.g. straight to a receipt right after scanning it).
+function goToPage(view) {
+  viewMode = view;
+  document.querySelectorAll("#bottom-nav .nav-tab").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  applyViewVisibility();
+  if (view === "photos") renderPhotosGrid();
+  if (view === "built") renderBuiltGrid();
 }
 
 /* ------------------------------------ settings modal ------------------------------------- */
@@ -1573,15 +1642,14 @@ document.addEventListener("click", (e) => {
 document.getElementById("btn-camera").addEventListener("click", () => document.getElementById("input-camera").click());
 document.getElementById("btn-upload").addEventListener("click", () => document.getElementById("input-upload").click());
 document.getElementById("btn-manual").addEventListener("click", addManual);
-document.getElementById("input-camera").addEventListener("change", (e) => handleFile(e.target.files?.[0]));
-document.getElementById("input-upload").addEventListener("change", (e) => handleFile(e.target.files?.[0]));
+document.getElementById("input-camera").addEventListener("change", (e) => handleFiles(e.target.files));
+document.getElementById("input-upload").addEventListener("change", (e) => handleFiles(e.target.files));
 
-const dz = document.getElementById("dropzone");
+const dz = document.getElementById("page-capture");
 dz.addEventListener("dragover", (e) => e.preventDefault());
 dz.addEventListener("drop", (e) => {
   e.preventDefault();
-  const f = e.dataTransfer.files?.[0];
-  if (f) handleFile(f);
+  handleFiles(e.dataTransfer.files); // dropping multiple files at once works too
 });
 
 document.getElementById("chips").addEventListener("click", (e) => {
@@ -1787,6 +1855,7 @@ window.addEventListener("resize", () => renderChart());
 })();
 
 applyStaticTranslations();
+applyViewVisibility();
 renderAll();
 
 // First run: ask for a name up front so scanning "just works" the first time someone

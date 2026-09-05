@@ -63,72 +63,108 @@
       </div>
     </div>
 
+    <!-- ================= PAGE 1: CAPTURE (the front door — one job, done simply) ================= -->
+    <div id="page-capture" class="page">
+      <div id="capture-idle">
+        <div class="capture-hero">
+          <div class="capture-icon">🧾</div>
+          <div class="capture-title" data-i18n="captureTitle">Scan a receipt</div>
+          <div class="capture-subtitle" data-i18n="captureSubtitle">Snap it. We'll do the rest.</div>
+        </div>
 
-    <div class="stats" id="stats"></div>
+        <button class="shutter-btn" id="btn-camera">
+          <span class="shutter-icon">📷</span>
+        </button>
+        <div class="shutter-label" data-i18n="takePhoto">Take photo</div>
 
-    <div class="dropzone" id="dropzone">
-      <div id="dz-idle">
-        <div class="dz-hint" data-i18n="dzHint">Drop a receipt image, or —</div>
-        <div class="dz-actions">
-          <button class="btn btn-primary" id="btn-camera">📷 <span data-i18n="takePhoto">Take photo</span></button>
+        <div class="capture-secondary">
           <button class="btn btn-secondary" id="btn-upload">⬆ <span data-i18n="upload">Upload</span></button>
           <button class="btn btn-ghost" id="btn-manual">+ <span data-i18n="addManually">Add manually</span></button>
         </div>
         <input id="input-camera" type="file" accept="image/*" capture="environment" hidden />
-        <input id="input-upload" type="file" accept="image/*" hidden />
+        <input id="input-upload" type="file" accept="image/*" multiple hidden />
       </div>
+
+      <div id="scan-toast" class="scan-toast" style="display:none;"></div>
+
       <div id="dz-progress" class="progress-wrap" style="display:none;">
         <div class="spinner"></div>
         <div id="progress-text" style="font-size:13px;" data-i18n="readingReceipt">Reading your receipt…</div>
         <div class="progress-bar-track"><div class="progress-bar-fill" id="progress-fill"></div></div>
       </div>
+
+      <div id="error-box" style="display:none;"></div>
     </div>
 
-    <div id="error-box" style="display:none;"></div>
+    <!-- ================= PAGE 2: ANALYTICS ================= -->
+    <div id="page-analytics" class="page" style="display:none;">
+      <div class="stats" id="stats"></div>
 
-    <div class="panel">
-      <div class="chips" id="chips"></div>
-      <div id="group-form" class="group-form" style="display:none;">
-        <input id="group-name" class="f" placeholder="Group name (e.g. Home)" maxlength="24" data-i18n-placeholder="groupNamePlaceholder" />
-        <div id="group-cat-checks" class="group-cat-checks"></div>
-        <div class="modal-actions" style="margin-top:10px;">
-          <button id="btn-group-cancel" class="btn btn-secondary" data-i18n="cancel">Cancel</button>
-          <button id="btn-group-save" class="btn btn-primary" data-i18n="createGroup">Create group</button>
+      <div class="panel">
+        <div class="chips" id="chips"></div>
+        <div id="group-form" class="group-form" style="display:none;">
+          <input id="group-name" class="f" placeholder="Group name (e.g. Home)" maxlength="24" data-i18n-placeholder="groupNamePlaceholder" />
+          <div id="group-cat-checks" class="group-cat-checks"></div>
+          <div class="modal-actions" style="margin-top:10px;">
+            <button id="btn-group-cancel" class="btn btn-secondary" data-i18n="cancel">Cancel</button>
+            <button id="btn-group-save" class="btn btn-primary" data-i18n="createGroup">Create group</button>
+          </div>
         </div>
+        <div class="panel-row">
+          <div>
+            <div class="panel-total-label" id="panel-total-label" data-i18n="total">Total</div>
+            <div class="panel-total-value" id="panel-total-value">0.00</div>
+          </div>
+          <div class="gtoggle" id="gtoggle">
+            <button data-g="day" class="active" data-i18n="day">Day</button>
+            <button data-g="week" data-i18n="week">Week</button>
+            <button data-g="month" data-i18n="month">Month</button>
+          </div>
+        </div>
+        <div class="chart" id="chart"></div>
       </div>
-      <div class="panel-row">
-        <div>
-          <div class="panel-total-label" id="panel-total-label" data-i18n="total">Total</div>
-          <div class="panel-total-value" id="panel-total-value">0.00</div>
+
+      <div class="panel">
+        <div class="panel-row" style="margin-bottom:2px;">
+          <div class="panel-total-label" data-i18n="lookUpMonth">Look up a month</div>
+          <input type="month" id="month-picker" class="f" style="width:150px;" />
         </div>
-        <div class="gtoggle" id="gtoggle">
-          <button data-g="day" class="active" data-i18n="day">Day</button>
-          <button data-g="week" data-i18n="week">Week</button>
-          <button data-g="month" data-i18n="month">Month</button>
-        </div>
+        <div id="month-results"></div>
       </div>
-      <div class="chart" id="chart"></div>
     </div>
 
-    <div class="panel">
-      <div class="panel-row" style="margin-bottom:2px;">
-        <div class="panel-total-label" data-i18n="lookUpMonth">Look up a month</div>
-        <input type="month" id="month-picker" class="f" style="width:150px;" />
-      </div>
-      <div id="month-results"></div>
+    <!-- ================= PAGE 3: LIST ================= -->
+    <div id="page-list" class="page" style="display:none;">
+      <input id="search-input" class="f search-input" placeholder="🔍 Search items — e.g. mælk, coffee, kylling" data-i18n-placeholder="searchPlaceholder" />
+      <div id="search-results" style="display:none;"></div>
+
+      <div class="section-label" id="count-label">0 receipts</div>
+      <div id="receipts-list" class="receipts"></div>
     </div>
 
-    <input id="search-input" class="f search-input" placeholder="🔍 Search items — e.g. mælk, coffee, kylling" data-i18n-placeholder="searchPlaceholder" />
-    <div id="search-results" style="display:none;"></div>
+    <!-- ================= PAGE 4: PHOTOS ================= -->
+    <div id="page-photos" class="page" style="display:none;">
+      <div class="section-label" id="photos-count-label">0 photos</div>
+      <div id="photos-grid" class="photos-grid"></div>
+    </div>
 
-    <div class="section-label" id="count-label">0 receipts</div>
-    <div id="receipts-list" class="receipts"></div>
-    <div id="photos-grid" class="photos-grid" style="display:none;"></div>
-    <div id="built-grid" class="photos-grid" style="display:none;"></div>
+    <!-- ================= PAGE 5: BUILT RECEIPTS ================= -->
+    <div id="page-built" class="page" style="display:none;">
+      <div class="section-label" id="built-count-label">0 receipts</div>
+      <div id="built-grid" class="photos-grid"></div>
+    </div>
   </div>
 
   <nav id="bottom-nav" class="bottom-nav">
-    <button class="nav-tab active" data-view="list">
+    <button class="nav-tab active" data-view="capture">
+      <span class="nav-icon">📷</span>
+      <span class="nav-label" data-i18n="captureView">Scan</span>
+    </button>
+    <button class="nav-tab" data-view="analytics">
+      <span class="nav-icon">📊</span>
+      <span class="nav-label" data-i18n="analyticsView">Insights</span>
+    </button>
+    <button class="nav-tab" data-view="list">
       <span class="nav-icon">&#9776;</span>
       <span class="nav-label" data-i18n="listView">List</span>
     </button>
