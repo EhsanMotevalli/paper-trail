@@ -268,7 +268,7 @@ const TRANSLATIONS = {
     close: "Close", download: "Download", share: "Share", viewReceiptDetails: "View receipt details",
     statToday: "Today", statWeek: "This week", statMonth: "This month", flat: "— flat",
     daysWord: "days", weeksWord: "weeks", monthsWord: "months",
-    nothingFiled: "Nothing filed yet. Scan your first receipt above.", addItem: "+ add item",
+    nothingFiled: "Nothing filed yet. Scan your first receipt above.", addItem: "+ add item", deleteLabel: "Delete",
     viewOriginalPhoto: "View original photo", viewBuiltReceipt: "View built receipt",
     editLabel: "✎ Edit", doneLabel: "✓ Done",
     noItemsMatchPrefix: "No items match", totalOnMatches: "Total on matches:",
@@ -311,7 +311,7 @@ const TRANSLATIONS = {
     close: "Luk", download: "Download", share: "Del", viewReceiptDetails: "Se kvitteringsdetaljer",
     statToday: "I dag", statWeek: "Denne uge", statMonth: "Denne måned", flat: "— uændret",
     daysWord: "dage", weeksWord: "uger", monthsWord: "måneder",
-    nothingFiled: "Intet arkiveret endnu. Scan din første kvittering ovenfor.", addItem: "+ tilføj vare",
+    nothingFiled: "Intet arkiveret endnu. Scan din første kvittering ovenfor.", addItem: "+ tilføj vare", deleteLabel: "Slet",
     viewOriginalPhoto: "Se originalt foto", viewBuiltReceipt: "Se opbygget kvittering",
     editLabel: "✎ Redigér", doneLabel: "✓ Færdig",
     noItemsMatchPrefix: "Ingen varer matcher", totalOnMatches: "Total for match:",
@@ -354,7 +354,7 @@ const TRANSLATIONS = {
     close: "Schließen", download: "Herunterladen", share: "Teilen", viewReceiptDetails: "Belegdetails ansehen",
     statToday: "Heute", statWeek: "Diese Woche", statMonth: "Dieser Monat", flat: "— unverändert",
     daysWord: "Tage", weeksWord: "Wochen", monthsWord: "Monate",
-    nothingFiled: "Noch nichts erfasst. Scanne oben deinen ersten Beleg.", addItem: "+ Artikel hinzufügen",
+    nothingFiled: "Noch nichts erfasst. Scanne oben deinen ersten Beleg.", addItem: "+ Artikel hinzufügen", deleteLabel: "Löschen",
     viewOriginalPhoto: "Originalfoto ansehen", viewBuiltReceipt: "Erstellten Beleg ansehen",
     editLabel: "✎ Bearbeiten", doneLabel: "✓ Fertig",
     noItemsMatchPrefix: "Keine Artikel passen zu", totalOnMatches: "Summe der Treffer:",
@@ -970,6 +970,9 @@ function tornPolygon(teeth = 22, depthPx = 9) {
 const TORN = tornPolygon();
 
 function renderReceipts() {
+  // Re-rendering replaces every DOM node, so any reference to a currently-open swipe
+  // card would otherwise go stale (pointing at a detached element).
+  openSwipeCard = null;
   const sorted = [...receipts].sort((a, b) => (a.date < b.date ? 1 : -1));
   document.getElementById("count-label").textContent = plural(sorted.length, "receiptWord", "receiptsWord");
   const list = document.getElementById("receipts-list");
@@ -1038,7 +1041,9 @@ function renderReceipts() {
             ${isEditing ? `<button class="btn-icon" data-act="add-item" data-rid="${r.id}" style="color:#3D5C43;align-self:flex-start;">${t("addItem")}</button>` : ""}
           </div>`;
 
-      return `<div class="receipt-card fade-in" style="clip-path:${TORN};transform:rotate(${rot}deg);">
+      return `<div class="receipt-swipe-wrap">
+        <div class="receipt-swipe-delete" data-act="swipe-delete" data-id="${r.id}">&#128465; ${esc(t("deleteLabel"))}</div>
+        <div class="receipt-card fade-in" data-rot="${rot}" data-id="${r.id}" style="clip-path:${TORN};transform:rotate(${rot}deg);">
         <div class="receipt-inner">
           <div class="r-top">
             <div style="flex:1;min-width:0;">
@@ -1053,11 +1058,11 @@ function renderReceipts() {
             <button class="btn-icon" data-act="toggle-open" data-id="${r.id}">${isOpen ? "&#9650;" : "&#9660;"} ${plural(r.items.length, "itemWord", "itemsWord")}</button>
             <button class="btn-icon" data-act="toggle-edit" data-id="${r.id}">${isEditing ? t("doneLabel") : t("editLabel")}</button>
             ${receiptsWithPhotos.has(r.id) ? `<button class="btn-icon" data-act="view-photo" data-id="${r.id}" title="${esc(t("viewOriginalPhoto"))}">&#128247;</button>` : ""}
-            <button class="btn-icon" data-act="view-built" data-id="${r.id}" title="${esc(t("viewBuiltReceipt"))}">&#129534;</button>
-            <button class="btn-icon" data-act="delete" data-id="${r.id}" style="color:#A8321F;margin-left:auto;">&#128465;</button>
+            <button class="btn-icon" data-act="view-built" data-id="${r.id}" title="${esc(t("viewBuiltReceipt"))}" style="margin-left:auto;">&#129534;</button>
           </div>
           ${warningMsg ? `<div class="retake-notice">&#9888; ${esc(warningMsg)}</div>` : ""}
           ${itemsHtml}
+        </div>
         </div>
       </div>`;
     })
@@ -1387,9 +1392,13 @@ function safeFilename(s) {
 }
 
 /* ------------------------------------ photos & built-receipts tabs ------------------------------------- */
+function skeletonTiles(count) {
+  return Array.from({ length: count }, () => `<div class="photo-thumb-skeleton"></div>`).join("");
+}
+
 async function renderPhotosGrid() {
   const grid = document.getElementById("photos-grid");
-  grid.innerHTML = `<div class="empty-state">${t("readingReceipt")}</div>`;
+  grid.innerHTML = skeletonTiles(6);
   photoImagesCache = await getAllImages();
   const withPhotos = receipts.filter((r) => photoImagesCache[r.id]);
   document.getElementById("photos-count-label").textContent = plural(withPhotos.length, "photoWord", "photosWord");
@@ -1763,7 +1772,7 @@ document.getElementById("receipts-list").addEventListener("click", async (e) => 
       expandedId = id;
     }
     renderReceipts();
-  } else if (act === "delete") {
+  } else if (act === "swipe-delete") {
     deleteReceipt(id);
   } else if (act === "view-photo") {
     const dataUrl = photoImagesCache[id] || (await getImage(id));
@@ -1780,6 +1789,86 @@ document.getElementById("receipts-list").addEventListener("click", async (e) => 
   } else if (act === "add-item") {
     addItem(btn.dataset.rid);
   }
+});
+
+// Native-style swipe-to-delete: drag a receipt card left to reveal a delete action
+// underneath, matching Mail-app conventions — replaces the old persistent trash icon,
+// which was one more small tap target crowding an already-busy action row.
+const SWIPE_REVEAL = 92; // px the card slides to fully reveal the delete button
+const SWIPE_DISMISS_THRESHOLD = SWIPE_REVEAL * 0.4;
+let swipeState = null;
+let openSwipeCard = null; // only one card revealed at a time, like Mail
+
+function closeOpenSwipeCard() {
+  if (openSwipeCard) {
+    const rot = openSwipeCard.dataset.rot || 0;
+    openSwipeCard.style.transform = `rotate(${rot}deg) translateX(0px)`;
+    openSwipeCard = null;
+  }
+}
+
+document.getElementById("receipts-list").addEventListener(
+  "touchstart",
+  (e) => {
+    const card = e.target.closest(".receipt-card");
+    if (!card) return;
+    // Don't start a swipe from inside editable fields/buttons — let taps work normally.
+    if (e.target.closest("input, select, button")) return;
+    if (openSwipeCard && openSwipeCard !== card) closeOpenSwipeCard();
+    swipeState = { card, startX: e.touches[0].clientX, startY: e.touches[0].clientY, dx: 0, deciding: true, horizontal: false };
+  },
+  { passive: true }
+);
+document.getElementById("receipts-list").addEventListener(
+  "touchmove",
+  (e) => {
+    if (!swipeState) return;
+    const dx = e.touches[0].clientX - swipeState.startX;
+    const dy = e.touches[0].clientY - swipeState.startY;
+    if (swipeState.deciding) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return; // not enough movement to decide yet
+      swipeState.horizontal = Math.abs(dx) > Math.abs(dy);
+      swipeState.deciding = false;
+    }
+    if (!swipeState.horizontal) {
+      swipeState = null; // vertical scroll — let the page scroll normally, we're done
+      return;
+    }
+    e.preventDefault(); // we own this gesture now, don't let the page scroll too
+    const alreadyOpen = swipeState.card === openSwipeCard;
+    const base = alreadyOpen ? -SWIPE_REVEAL : 0;
+    const clamped = Math.max(-SWIPE_REVEAL, Math.min(0, base + dx));
+    swipeState.dx = clamped;
+    const rot = swipeState.card.dataset.rot || 0;
+    swipeState.card.style.transition = "none";
+    swipeState.card.style.transform = `rotate(${rot}deg) translateX(${clamped}px)`;
+  },
+  { passive: false }
+);
+document.getElementById("receipts-list").addEventListener(
+  "touchend",
+  () => {
+    if (!swipeState || !swipeState.horizontal) {
+      swipeState = null;
+      return;
+    }
+    const { card, dx } = swipeState;
+    const rot = card.dataset.rot || 0;
+    card.style.transition = "transform 0.2s ease";
+    if (dx <= -SWIPE_DISMISS_THRESHOLD) {
+      card.style.transform = `rotate(${rot}deg) translateX(-${SWIPE_REVEAL}px)`;
+      openSwipeCard = card;
+    } else {
+      card.style.transform = `rotate(${rot}deg) translateX(0px)`;
+      if (openSwipeCard === card) openSwipeCard = null;
+    }
+    swipeState = null;
+  },
+  { passive: true }
+);
+// Tapping anywhere else closes a revealed swipe card, same as Mail.
+document.addEventListener("click", (e) => {
+  if (openSwipeCard && !e.target.closest(".receipt-swipe-wrap")) closeOpenSwipeCard();
 });
 
 document.getElementById("receipts-list").addEventListener("change", (e) => {
